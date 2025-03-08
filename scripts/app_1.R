@@ -38,17 +38,21 @@ ui <- fluidPage(
                   choices = genes),
       selectInput("tissue", "Select tissue:", 
                   choices = gsub("_", " ", tissues)),
-      actionButton("plot", "Generate Plot")
-    ),
+      actionButton("plot", "Generate Plot"),
+      checkboxInput("log2_transform", "Apply log2 transformation to TPM", value = TRUE),  # Checkbox to toggle log transformation
+      checkboxInput("log10_transform", "Apply log10 transformation to TPM", value = TRUE)  # Checkbox to toggle log transformation
+      ),
     mainPanel(
-      plotOutput("tpmPlot")
+      plotOutput("tpmPlot"),      
+      textOutput("errorMsg")  # Error message output
+
     )
   )
 )
 
 # Define Server
 server <- function(input, output, session) {
-    # Function to read and preprocess data
+  # Function to read and preprocess data
   read_and_preprocess_data <- function(gene, tissue) {
     req(gene, tissue)  
     exp.path <- file.path(raw_data_dir, sprintf("gene_tpm_v10_%s.gct.gz", gsub(" ", "_", tissue)))
@@ -68,7 +72,7 @@ server <- function(input, output, session) {
         sex_plot = ifelse(sex == 1, "Male", "Female")
       )
     
-    # dataset based on tissue and gene
+    # datasets based on tissue and gene
     X <- exp %>% filter(Description == gene)
     if (nrow(X) == 0) return("Error: Gene not found.")
     X <- X %>%
@@ -87,6 +91,7 @@ server <- function(input, output, session) {
     if (is.character(res)) return(data.frame(age_plot = NA, TPM = NA, sex_plot = NA))  # Return empty dataframe
     res
   })
+
   
   # Render plot
   output$tpmPlot <- renderPlot({
@@ -94,25 +99,37 @@ server <- function(input, output, session) {
     validate(
       need(!is.null(df), "No data available for the selected gene and tissue.")
     )
+
+    # Apply log transformation if checkbox is selected
+    if (input$log2_transform) {
+      df$TPM <- log2(df$TPM)
+    }
+    if (input$log10_transform) {
+      df$TPM <- log10(df$TPM)
+    }
     
-    ggplot(data = df, aes(x = age_plot, y = log10(TPM), colour = sex_plot)) +
+    
+    ggplot(data = df, aes(x = age_plot, y = (TPM), colour = sex_plot)) +
       geom_smooth(method = "lm", formula = y ~ x, fill = "lightgray", alpha = 0.3) +
       geom_point(alpha = 0.7, size = 2) +
       scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
       ggtitle(sprintf(" Expression of %s in %s", input$gene, input$tissue)) +
       xlab("Age") +
-      ylab("log10_TPM") + 
+      ylab("log2_TPM") + 
       theme_minimal()
   })
-
+  
   
   # Error message output
   output$errorMsg <- renderText({
-    res <- read_and_preprocess_data(input$gene, input$tissue)
-    if (is.character(res)) return(res)
+    df <- plotData()
+    if (is.null(df) || nrow(df) == 0) {
+      return("Error: Unable to load data for the selected gene and tissue.")
+    }
     NULL
   })
 }
 
 # Run the application
 shinyApp(ui = ui, server = server)
+
