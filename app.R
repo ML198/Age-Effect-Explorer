@@ -37,8 +37,7 @@ ui <- fluidPage(
       selectInput("gene", "Select gene:", choices = genes),
       selectInput("tissue", "Select tissue:", choices = tissues),
       actionButton("plot", "Generate Plot"),
-      checkboxInput("log_transform", "Apply log transformation to TPM", value = TRUE),
-      checkboxInput("plot_type", "Violin plot", value = TRUE)  # New checkbox for plot type
+      checkboxInput("plot_type", "Show Violin & Box Plot (Uncheck for Regression Plot)",value = TRUE)  # New checkbox for plot type
       
     ),
     mainPanel(
@@ -78,17 +77,11 @@ server <- function(input, output, session) {
     exp <- read.table(gzfile(exp.path), sep = "\t", skip = 2, header = TRUE)
     
     # Load metadata file
-    metadata_path <- file.path(raw_data_dir, "GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
+    metadata_path <- file.path(raw_data_dir, "Updated_GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
     if (!file.exists(metadata_path)) {
       stop("Error: Metadata file missing at ", metadata_path)
     }
     metadata <- read.table(metadata_path, sep = "\t", header = TRUE)
-    
-    # Clean metadata and format
-    metadata <- metadata %>%
-      rename(donor = SUBJID, sex = SEX, age = AGE, death_type = DTHHRDY) %>%
-      mutate(age_plot = as.numeric(sub("-.*", "", age)), 
-             sex_plot = ifelse(sex == 1, "Male", "Female"))
     
     # Extract data for the selected gene and tissue
     X <- exp %>% filter(Description == gene)
@@ -98,8 +91,9 @@ server <- function(input, output, session) {
     X <- X %>%
       select(-Name, -Description) %>%
       pivot_longer(cols = everything(), names_to = "sample", values_to = "TPM") %>%
-      mutate(donor = sub("^([^.]+)\\.([^.]+).*", "\\1-\\2", sample)) %>%
-      select(donor, TPM)
+      mutate(donor = sub("^([^.]+)\\.([^.]+).*", "\\1-\\2", sample)) %>% 
+      mutate(logTPM = log(TPM + 1)) %>% 
+      select(donor, logTPM)
     
     # Merge with metadata
     mergedData <- left_join(X, metadata, by = "donor")
@@ -126,37 +120,23 @@ server <- function(input, output, session) {
     # Check for errors in the reactive data
     validate(need(!"error_msg" %in% colnames(df) || is.null(df$error_msg), df$error_msg))
     
-    # Apply log transformation if selected
-    if (input$log_transform) {
-      df$TPM <- log(df$TPM + 1)  # Log-transform to avoid log(0)
-    }
-    
-    # Filter out rows with missing data
-    df <- df %>%
-      filter(!is.na(TPM), !is.na(age_plot))
-    
-    # Define age groups
-    df <- df %>%
-      mutate(age_group = cut(age_plot, breaks = seq(0, 100, by = 10), include.lowest = TRUE, 
-                             labels = paste(seq(0, 90, by = 10), seq(10, 100, by = 10), sep = "-")))
-    
     # Plot using ggplot2
     if (input$plot_type) {
       # Violin plot
-      ggplot(df, aes(x = age_plot, y = TPM, fill = sex_plot)) +
+      ggplot(df, aes(x = age_plot, y = logTPM, fill = sex_plot)) +
         geom_violin(trim = FALSE, alpha = 0.3) +  # Violin plot with transparency
         geom_boxplot(width = 0.2, alpha = 0.6) +  # Box plot on top with transparency
         scale_fill_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
         ggtitle(sprintf("Expression of %s in %s (Box & Violin Plot)", input$gene, input$tissue)) +
-        xlab("Age") + ylab("TPM") + 
+        xlab("Age") + ylab("logTPM") + 
         theme_minimal()
     } else {
-      ggplot(df, aes(x = age_plot, y = TPM, color = sex_plot)) +
+      ggplot(df, aes(x = age_plot, y = logTPM, color = sex_plot)) +
         geom_smooth(method = "lm", formula = y ~ x, fill = "lightgray", alpha = 0.3) +
         geom_point(alpha = 0.7, size = 2) +
         scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
         ggtitle(sprintf("Expression of %s in %s", input$gene, input$tissue)) +
-        xlab("Age") + ylab("TPM") + theme_minimal()
+        xlab("Age") + ylab("logTPM") + theme_minimal()
     }
     
   })
@@ -193,7 +173,6 @@ server <- function(input, output, session) {
       write.csv(pvalue_data, file, row.names = FALSE)
     }
   )
-  
 }
 
 # Run the application
