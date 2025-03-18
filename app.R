@@ -37,10 +37,17 @@ ui <- fluidPage(
       selectInput("gene", "Select gene:", choices = genes),
       selectInput("tissue", "Select tissue:", choices = tissues),
       actionButton("plot", "Generate Plot"),
-      checkboxInput("log_transform", "Apply log transformation to TPM", value = TRUE)
+      checkboxInput("log_transform", "Apply log transformation to TPM", value = TRUE),
+      checkboxInput("plot_type", "Violin plot", value = TRUE)  # New checkbox for plot type
+      
     ),
     mainPanel(
-      plotOutput("tpmPlot")  # Adding output for the plot
+      tabsetPanel(
+        tabPanel("Plot", plotOutput("tpmPlot")),
+        tabPanel("P-Value Table", 
+                 DT::dataTableOutput("pvalueTable"),
+                 downloadButton("downloadTable", "Download P-Value Table"))
+      )
     )
   )
 )
@@ -134,13 +141,59 @@ server <- function(input, output, session) {
                              labels = paste(seq(0, 90, by = 10), seq(10, 100, by = 10), sep = "-")))
     
     # Plot using ggplot2
-    ggplot(df, aes(x = age_plot, y = TPM, color = sex_plot)) +
-      geom_smooth(method = "lm", formula = y ~ x, fill = "lightgray", alpha = 0.3) +
-      geom_point(alpha = 0.7, size = 2) +
-      scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
-      ggtitle(sprintf("Expression of %s in %s", input$gene, input$tissue)) +
-      xlab("Age") + ylab("TPM") + theme_minimal()
+    if (input$plot_type) {
+      # Violin plot
+      ggplot(df, aes(x = age_plot, y = TPM, fill = sex_plot)) +
+        geom_violin(trim = FALSE, alpha = 0.3) +  # Violin plot with transparency
+        geom_boxplot(width = 0.2, alpha = 0.6) +  # Box plot on top with transparency
+        scale_fill_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
+        ggtitle(sprintf("Expression of %s in %s (Box & Violin Plot)", input$gene, input$tissue)) +
+        xlab("Age") + ylab("TPM") + 
+        theme_minimal()
+    } else {
+      ggplot(df, aes(x = age_plot, y = TPM, color = sex_plot)) +
+        geom_smooth(method = "lm", formula = y ~ x, fill = "lightgray", alpha = 0.3) +
+        geom_point(alpha = 0.7, size = 2) +
+        scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
+        ggtitle(sprintf("Expression of %s in %s", input$gene, input$tissue)) +
+        xlab("Age") + ylab("TPM") + theme_minimal()
+    }
+    
   })
+  
+  # Function to load the p-value table
+  load_pvalue_table <- function(tissue) {
+    output_path <- file.path(here::here("gtex_v10_shiny/data"), paste0(gsub(" ", "_", tissue), "_pvalue_results.csv"))
+    if (!file.exists(output_path)) {
+      return(NULL)
+    }
+    read.csv(output_path)
+  }
+  
+  # Render the p-value table
+  output$pvalueTable <- DT::renderDataTable({
+    req(input$tissue)
+    pvalue_data <- load_pvalue_table(input$tissue)
+    
+    validate(need(!is.null(pvalue_data), "P-Value table not found for the selected tissue."))
+    
+    DT::datatable(pvalue_data, options = list(pageLength = 10, autoWidth = TRUE))
+  })
+  
+  # Download handler
+  output$downloadTable <- downloadHandler(
+    filename = function() {
+      paste0(input$tissue, "_pvalue_results.csv")
+    },
+    content = function(file) {
+      pvalue_data <- load_pvalue_table(input$tissue)
+      if (is.null(pvalue_data)) {
+        stop("P-Value table not found.")
+      }
+      write.csv(pvalue_data, file, row.names = FALSE)
+    }
+  )
+  
 }
 
 # Run the application
