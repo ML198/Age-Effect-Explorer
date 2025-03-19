@@ -64,15 +64,9 @@ server <- function(input, output, session) {
     # Dynamically generate the URL for the tissue
     tissue_url <- sprintf("https://storage.googleapis.com/adult-gtex/bulk-gex/v10/rna-seq/tpms-by-tissue/gene_tpm_v10_%s.gct.gz", gsub(" ", "_", tissue))
     # Try to read the data from the URL
-    # Try to download and read the data
     exp <- tryCatch({
-      # Create a temporary file
       temp_file <- tempfile(fileext = ".gz")
-      
-      # Download the file to the temp file
       download.file(tissue_url, temp_file, mode = "wb")
-      
-      # Read the data from the downloaded file
       read.table(gzfile(temp_file), sep = "\t", skip = 2, header = TRUE)
     }, error = function(e) {
       return(NULL)
@@ -126,7 +120,14 @@ server <- function(input, output, session) {
     
     # P-value analysis
     if (input$show_pvalue) {
-      fit <- lm(logTPM ~ age_plot + sex_plot, data = df)
+      
+      # Check for single level in sex_plot
+      if (length(unique(df$sex_plot)) == 1) {
+        fit <- lm(logTPM ~ age_plot, data = df)
+      } else {
+        fit <- lm(logTPM ~ age_plot + sex_plot, data = df)
+      }
+      
       coefs <- summary(fit)$coefficients
       p_val <- if("age_plot" %in% rownames(coefs)) coefs["age_plot", "Pr(>|t|)"] else NA_real_
       

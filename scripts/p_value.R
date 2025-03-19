@@ -1,16 +1,11 @@
 library(dplyr)
-library(tidyr)
+library(tidyverse)
 library(here)
 
 # Load tissue names and metadata
 tissues <- readLines(here::here("gtex_v10_shiny/data/tissue_names.txt"))
-metadata.path <- here::here("gtex_v10_shiny/data/raw_data/GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
+metadata.path <- here::here("gtex_v10_shiny/data/raw_data/Updated_GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
 metadata <- read.table(metadata.path, sep = "\t", header = TRUE)
-colnames(metadata) <- c("donor", "sex", "age", "death_type")
-
-# Create additional columns for age and sex
-metadata$age_plot <- sapply(metadata$age, function(a) as.numeric(strsplit(a, "-")[[1]][1]))
-metadata$sex_plot <- ifelse(metadata$sex == 1, "Male", "Female")
 
 # Function to calculate p-values for all genes in a given tissue
 calc_all_genes_pvalue_for_tissue <- function(tissue) {
@@ -45,17 +40,26 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
     group_by(Description) %>%
     summarise(
       p_value = {
-        df_sub <- cur_data()  # Use cur_data() instead of deprecated pick()
+        df_sub <- cur_data_all()
         df_sub$logTPM <- log(df_sub$TPM + 1)
-        fit <- lm(logTPM ~ age_plot + sex_plot, data = df_sub)
+        df_sub <- df_sub %>%
+          mutate(sex_plot = factor(sex_plot),
+                 age_plot = factor(age_plot))
+        
+        # Check for single level in sex_plot
+        if (length(unique(df_sub$sex_plot)) == 1) {
+          fit <- lm(logTPM ~ age_plot, data = df_sub)
+        } else {
+          fit <- lm(logTPM ~ age_plot + sex_plot, data = df_sub)
+        }
+        
         s <- summary(fit)$coefficients
-        if ("age_plot" %in% rownames(s)) {
-          s["age_plot", "Pr(>|t|)"]
+        if("age_plot" %in% rownames(s)) {
+          s["age_plot","Pr(>|t|)"]
         } else {
           NA_real_
         }
-      },
-      .groups = "drop"
+      }
     ) %>%
     rename(Gene = Description) %>%
     arrange(p_value) %>%
@@ -66,7 +70,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
 }
 
 # Loop through tissues and process each one
-for (tissue in tissues) {
+for (tissue in "cervix ectocervix") {
   cat("Processing tissue:", tissue, "\n")
   
   # Calculate p-values
