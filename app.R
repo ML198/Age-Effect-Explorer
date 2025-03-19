@@ -2,11 +2,11 @@ library(tidyverse)  # tidyverse includes dplyr, ggplot2, etc.
 library(DT)         # For the datatable
 
 # Set the app directory
-if (requireNamespace("rprojroot", quietly = TRUE)) {
-  app_dir <- rprojroot::find_rstudio_root_file()
-  print(app_dir)
-}
-
+# if (requireNamespace("rprojroot", quietly = TRUE)) {
+#   app_dir <- rprojroot::find_rstudio_root_file()
+#   print(app_dir)
+# }
+app_dir <- here::here()
 # Define paths relative to the app directory
 data_dir <- file.path(app_dir, "gtex_v10_shiny/data")
 raw_data_dir <- file.path(data_dir, "raw_data")
@@ -59,12 +59,35 @@ server <- function(input, output, session) {
     
     exp.path <- file.path(raw_data_dir, sprintf("gene_tpm_v10_%s.gct.gz", gsub(" ", "_", tissue)))
     if (!file.exists(exp.path)) return(NULL)
-    
     exp <- read.table(gzfile(exp.path), sep = "\t", skip = 2, header = TRUE)
+    
+    # Dynamically generate the URL for the tissue
+    tissue_url <- sprintf("https://storage.googleapis.com/adult-gtex/bulk-gex/v10/rna-seq/tpms-by-tissue/gene_tpm_v10_%s.gct.gz", gsub(" ", "_", tissue))
+    # Try to read the data from the URL
+    # Try to download and read the data
+    exp <- tryCatch({
+      # Create a temporary file
+      temp_file <- tempfile(fileext = ".gz")
+      
+      # Download the file to the temp file
+      download.file(tissue_url, temp_file, mode = "wb")
+      
+      # Read the data from the downloaded file
+      read.table(gzfile(temp_file), sep = "\t", skip = 2, header = TRUE)
+    }, error = function(e) {
+      return(NULL)
+    })
+    
+    # Check the result
+    if (is.null(exp)) {
+      print("Error: Unable to download or read the file.")
+    } else {
+      print(head(exp))  # Display the first few rows of the data
+    }
+    
     
     metadata_path <- file.path(raw_data_dir, "Updated_GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
     if (!file.exists(metadata_path)) return(NULL)
-    
     metadata <- read.table(metadata_path, sep = "\t", header = TRUE)
     
     X <- exp %>% filter(Description == gene)
@@ -116,9 +139,9 @@ server <- function(input, output, session) {
         scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
         annotate("text", x = min(df$age_plot, na.rm = TRUE) + 2, 
                  y = max(df$logTPM, na.rm = TRUE),
-                 label = pval_label, hjust = -5, vjust = 1.5, size = 5) +
+                 label = pval_label, hjust = -4.6, vjust = 1.5, size = 5) +
         labs(title = sprintf("Expression of %s in %s", input$gene, input$tissue),
-             x = "Age", y = "log(TPM + 1)") +
+             x = "Age", y = "logTPM") +
         theme_minimal()
     } else {
       # Plot without p-value analysis
