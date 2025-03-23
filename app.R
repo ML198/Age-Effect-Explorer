@@ -7,6 +7,7 @@ library(DT)         # For the datatable
 #   print(app_dir)
 # }
 app_dir <- here::here()
+
 # Define paths relative to the app directory
 data_dir <- file.path(app_dir, "gtex_v10_shiny/data")
 raw_data_dir <- file.path(data_dir, "raw_data")
@@ -57,9 +58,9 @@ server <- function(input, output, session) {
   read_and_preprocess_data <- function(gene, tissue) {
     req(gene, tissue)  # Ensure both inputs are available
     
-    exp.path <- file.path(raw_data_dir, sprintf("gene_tpm_v10_%s.gct.gz", gsub(" ", "_", tissue)))
-    if (!file.exists(exp.path)) return(NULL)
-    exp <- read.table(gzfile(exp.path), sep = "\t", skip = 2, header = TRUE)
+    # exp.path <- file.path(raw_data_dir, sprintf("gene_tpm_v10_%s.gct.gz", gsub(" ", "_", tissue)))
+    # if (!file.exists(exp.path)) return(NULL)
+    # exp <- read.table(gzfile(exp.path), sep = "\t", skip = 2, header = TRUE)
     
     # Dynamically generate the URL for the tissue
     tissue_url <- sprintf("https://storage.googleapis.com/adult-gtex/bulk-gex/v10/rna-seq/tpms-by-tissue/gene_tpm_v10_%s.gct.gz", gsub(" ", "_", tissue))
@@ -76,7 +77,7 @@ server <- function(input, output, session) {
     if (is.null(exp)) {
       print("Error: Unable to download or read the file.")
     } else {
-      print(head(exp))  # Display the first few rows of the data
+      # print(head(exp))  # Display the first few rows of the data
     }
     
     
@@ -140,7 +141,7 @@ server <- function(input, output, session) {
         scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
         annotate("text", x = min(df$age_plot, na.rm = TRUE) + 2, 
                  y = max(df$logTPM, na.rm = TRUE),
-                 label = pval_label, hjust = -4.6, vjust = 1.5, size = 5) +
+                 label = pval_label, hjust = -4, vjust = -0.5, size = 5) +
         labs(title = sprintf("Expression of %s in %s", input$gene, input$tissue),
              x = "Age", y = "logTPM") +
         theme_minimal()
@@ -179,7 +180,10 @@ server <- function(input, output, session) {
     req(input$tissue)
     pvalue_data <- load_pvalue_table(input$tissue)
     
-    validate(need(!is.null(pvalue_data), "P-Value table not found for the selected tissue."))
+    validate(
+      need(!is.null(df), "Error: No matching data for this gene-tissue pair."),
+      need(!("error_msg" %in% colnames(df)) || is.null(df$error_msg), "Unexpected error occurred.")
+    )
     
     DT::datatable(pvalue_data, options = list(pageLength = 10, autoWidth = TRUE))
   })
