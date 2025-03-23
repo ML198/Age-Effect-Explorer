@@ -1,5 +1,7 @@
 library(tidyverse)  # tidyverse includes dplyr, ggplot2, etc.
 library(DT)         # For the datatable
+library(conflicted)
+conflicts_prefer(dplyr::filter)
 
 # Set the app directory
 # if (requireNamespace("rprojroot", quietly = TRUE)) {
@@ -9,7 +11,7 @@ library(DT)         # For the datatable
 app_dir <- here::here()
 
 # Define paths relative to the app directory
-data_dir <- file.path(app_dir, "gtex_v10_shiny/data")
+data_dir <- file.path(app_dir, "data")
 raw_data_dir <- file.path(data_dir, "raw_data")
 
 # Load tissue names
@@ -33,7 +35,7 @@ ui <- fluidPage(
   titlePanel("GTEx Gene Expression Analysis"),
   sidebarLayout(
     sidebarPanel(
-      selectInput("gene", "Select gene:", choices = genes),
+      selectInput("gene", "Select Gene", choices = genes, selectize = TRUE),
       selectInput("tissue", "Select tissue:", choices = tissues),
       actionButton("plot", "Generate Plot"),
       checkboxInput("show_pvalue", "Show P-value Analysis", value = TRUE),  # Add checkbox for p-value
@@ -67,7 +69,7 @@ server <- function(input, output, session) {
     # Try to read the data from the URL
     exp <- tryCatch({
       temp_file <- tempfile(fileext = ".gz")
-      download.file(tissue_url, temp_file, mode = "wb")
+      download.file(tissue_url, temp_file, mode = "wb", quiet = TRUE)
       read.table(gzfile(temp_file), sep = "\t", skip = 2, header = TRUE)
     }, error = function(e) {
       return(NULL)
@@ -76,9 +78,7 @@ server <- function(input, output, session) {
     # Check the result
     if (is.null(exp)) {
       print("Error: Unable to download or read the file.")
-    } else {
-      # print(head(exp))  # Display the first few rows of the data
-    }
+    } 
     
     
     metadata_path <- file.path(raw_data_dir, "Updated_GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
@@ -137,7 +137,7 @@ server <- function(input, output, session) {
       
       ggplot(df, aes(x = age_plot, y = logTPM, color = sex_plot)) +
         geom_point(alpha = 0.7, size = 2) +
-        geom_line(aes(y = pred_logTPM), size = 1) +
+        geom_line(aes(y = pred_logTPM), linewidth = 1) +
         scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
         annotate("text", x = min(df$age_plot, na.rm = TRUE) + 2, 
                  y = max(df$logTPM, na.rm = TRUE),
@@ -168,7 +168,7 @@ server <- function(input, output, session) {
   
   # Function to load the p-value table
   load_pvalue_table <- function(tissue) {
-    output_path <- file.path(here::here("gtex_v10_shiny/data/p_value/"), paste0(gsub(" ", "_", tissue), "_pvalue_results.csv"))
+    output_path <- file.path(here::here("data/p_value"), paste0(gsub(" ", "_", tissue), "_pvalue_results.csv"))
     if (!file.exists(output_path)) {
       return(NULL)
     }

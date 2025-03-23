@@ -1,11 +1,3 @@
-stomach
-testis
-thyroid
-uterus
-vagina
-whole blood
-
-
 adipose subcutaneous
 adipose visceral omentum
 adrenal gland
@@ -54,3 +46,9 @@ skin not sun exposed suprapubic
 skin sun exposed lower leg
 small intestine terminal ileum
 spleen
+stomach
+testis
+thyroid
+uterus
+vagina
+whole blood
