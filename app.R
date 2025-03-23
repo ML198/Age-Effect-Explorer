@@ -168,7 +168,7 @@ server <- function(input, output, session) {
   
   # Function to load the p-value table
   load_pvalue_table <- function(tissue) {
-    output_path <- file.path(here::here("gtex_v10_shiny/data"), paste0(gsub(" ", "_", tissue), "_pvalue_results.csv"))
+    output_path <- file.path(here::here("gtex_v10_shiny/data/p_value/"), paste0(gsub(" ", "_", tissue), "_pvalue_results.csv"))
     if (!file.exists(output_path)) {
       return(NULL)
     }
