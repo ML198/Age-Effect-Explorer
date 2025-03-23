@@ -1,0 +1,100 @@
+---
+title: "test_2"
+output: html_notebook
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r}
+knitr::opts_knit$set(root.dir = "/Users/mingruili/Documents/shiny/shiny-try")
+
+```
+
+```{r}
+library(shiny)
+library(tidyverse)
+library(ggplot2)
+here::i_am("shiny-try/test_2.Rmd")
+tissues <- readLines(here::here("gtex_v10_shiny/data/tissue_names.txt"))
+genes <- readLines(here::here("gtex_v10_shiny/data/gene_names.txt"))
+# Define UI
+ui <- fluidPage(
+  titlePanel("GTEx Gene Expression Analysis"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("gene", "Select gene:", 
+                  choices = genes),
+      selectInput("tissue", "Select tissue:", 
+                  choices = gsub("_", " ", tissues)),
+      actionButton("plot", "Generate Plot")
+    ),
+    mainPanel(
+      plotOutput("tpmPlot")
+    )
+  )
+)
+
+# Define Server
+server <- function(input, output) {
+  
+  # Function to read and preprocess data
+  read_and_preprocess_data <- function(gene, tissue) {
+  req(gene, tissue)  # Ensure inputs are available
+  
+  exp.path <- sprintf(here::here("gtex_v10_shiny/data/raw_data/gene_tpm_v10_%s.gct.gz"), gsub(" ","_", tissue))
+  metadata.path <- here::here("gtex_v10_shiny/data/raw_data/GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
+  
+  if (!file.exists(exp.path) || !file.exists(metadata.path)) {
+    return(NULL)  # Returning NULL so the reactive function can handle it
+  }
+  
+  exp <- read.table(gzfile(exp.path), sep = "\t", skip = 2, header = TRUE)
+  metadata <- read.table(metadata.path, sep = "\t", header = TRUE)
+  
+  colnames(exp) <- gsub("\\.", "-", colnames(exp))
+  colnames(metadata) <- c("donor", "sex", "age", "death_type")
+  
+  metadata$age_plot <- sapply(metadata$age, function(a) as.numeric(strsplit(a, "-")[[1]][1]))
+  metadata$sex_plot <- ifelse(metadata$sex == 1, "Male", "Female")
+  
+  X <- subset(exp, Description == gene)
+  if (nrow(X) == 0) return(NULL)  # Gene not found, return NULL
+  
+  X <- subset(X, select = -c(Name, Description)) %>% 
+    t() %>% as.data.frame()
+  
+  X$donor <- sapply(rownames(X), function(s) {
+    paste0(strsplit(s, "-")[[1]][1], "-", strsplit(s, "-")[[1]][2])
+  })
+  colnames(X) <- c("TPM", "donor")
+  
+  mergedData <- merge(X, metadata, by = "donor")
+  return(mergedData)
+}
+
+  # Reactive expression to generate plot data
+  plotData <- eventReactive(input$plot, {
+    req(input$gene, input$tissue)
+    read_and_preprocess_data(input$gene, input$tissue)
+  })
+  
+  # Render plot
+  output$tpmPlot <- renderPlot({
+    df <- plotData()
+    req(df)
+    
+    ggplot(data = df, aes(x = age_plot, y = TPM, colour = sex_plot)) +
+      geom_smooth(method = "lm", formula = y ~ x, fill = "lightgray", alpha = 0.3) +
+      geom_point(alpha = 0.7, size = 2) +
+      scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
+      ggtitle(sprintf("%s Expression\n%s", input$gene, input$tissue)) +
+      xlab("Age") +
+      theme_minimal()
+  })
+}
+
+# Run the application
+shinyApp(ui = ui, server = server)
+
+```
