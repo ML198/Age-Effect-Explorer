@@ -92,7 +92,7 @@ server <- function(input, output, session) {
       select(-Name, -Description) %>%
       pivot_longer(cols = everything(), names_to = "sample", values_to = "TPM") %>%
       mutate(donor = sub("^([^.]+)\\.([^.]+).*", "\\1-\\2", sample)) %>% 
-      mutate(logTPM = log(TPM + 1)) %>% 
+      mutate(logTPM = log2(TPM + 1)) %>% 
       select(donor, logTPM)
     
     mergedData <- left_join(X, metadata, by = "donor")
