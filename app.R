@@ -2,17 +2,14 @@ library(tidyverse)  # tidyverse includes dplyr, ggplot2, etc.
 library(DT)         # For the datatable
 library(conflicted)
 conflicts_prefer(dplyr::filter)
+library(qvalue)
 
 # Set the app directory
-# if (requireNamespace("rprojroot", quietly = TRUE)) {
-#   app_dir <- rprojroot::find_rstudio_root_file()
-#   print(app_dir)
-# }
 app_dir <- here::here()
 
 # Define paths relative to the app directory
 data_dir <- file.path(app_dir, "data")
-raw_data_dir <- file.path(data_dir, "raw_data")
+p_value_dir <- file.path(data_dir, "p_value")
 
 # Load tissue names
 tissue_file <- file.path(data_dir, "tissue_names.txt")
@@ -81,7 +78,7 @@ server <- function(input, output, session) {
     } 
     
     
-    metadata_path <- file.path(raw_data_dir, "Updated_GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
+    metadata_path <- file.path(data_dir, "Updated_GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
     if (!file.exists(metadata_path)) return(NULL)
     metadata <- read.table(metadata_path, sep = "\t", header = TRUE)
     
@@ -130,7 +127,7 @@ server <- function(input, output, session) {
       }
       
       coefs <- summary(fit)$coefficients
-      p_val <- if("age_plot" %in% rownames(coefs)) coefs["age_plot", "Pr(>|t|)"] else NA_real_
+      p_val <- if ("age_plot" %in% rownames(coefs)) signif(coefs["age_plot", "Pr(>|t|)"], 4) else NA_real_
       
       df$pred_logTPM <- predict(fit, newdata = df)
       pval_label <- paste0("p = ", format(p_val, digits = 3, scientific = TRUE))
@@ -141,7 +138,7 @@ server <- function(input, output, session) {
         scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
         annotate("text", x = min(df$age_plot, na.rm = TRUE) + 2, 
                  y = max(df$logTPM, na.rm = TRUE),
-                 label = pval_label, hjust = -4, vjust = -0.5, size = 5) +
+                 label = pval_label, hjust = -3.4, vjust = -0.2) +
         labs(title = sprintf("Expression of %s in %s", input$gene, input$tissue),
              x = "Age", y = "logTPM") +
         theme_minimal()
@@ -168,11 +165,12 @@ server <- function(input, output, session) {
   
   # Function to load the p-value table
   load_pvalue_table <- function(tissue) {
-    output_path <- file.path(here::here("data/p_value"), paste0(gsub(" ", "_", tissue), "_pvalue_results.csv"))
+    output_path <- file.path(p_value_dir, paste0(gsub(" ", "_", tissue), "_pvalue_results.csv"))
     if (!file.exists(output_path)) {
       return(NULL)
     }
-    read.csv(output_path)
+    df <- read.csv(output_path)
+    return(df)
   }
   
   # Render the p-value table
@@ -186,6 +184,8 @@ server <- function(input, output, session) {
     )
     
     DT::datatable(pvalue_data, options = list(pageLength = 10, autoWidth = TRUE))
+
+    
   })
   
   # Download handler
