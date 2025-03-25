@@ -2,23 +2,20 @@ library(dplyr)
 library(tidyverse)
 library(here)
 library(broom)
-
+library(qvalue)
 # Load tissue names and metadata
-tissues <- readLines(here::here("gtex_v10_shiny/data/tissue_names.txt"))
-metadata.path <- here::here("gtex_v10_shiny/data/raw_data/Updated_GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
+app_dir <- here::here()
+data_dir <- file.path(app_dir, "data")
+p_value_dir <- file.path(data_dir, "p_value")
+
+
+tissue_file <- file.path(data_dir, "tissue_names.txt")
+tissues <- readLines(tissue_file)
+metadata.path <- file.path(data_dir, "Updated_GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
 metadata <- read.table(metadata.path, sep = "\t", header = TRUE)
 
 # Function to calculate p-values for all genes in a given tissue
 calc_all_genes_pvalue_for_tissue <- function(tissue) {
-  # exp.path <- sprintf(here::here("gtex_v10_shiny/data/raw_data/gene_tpm_v10_%s.gct.gz"), 
-  #                     gsub(" ", "_", tissue))
-  # # Check if the file exists
-  # if (!file.exists(exp.path)) {
-  #   warning("File not found: ", exp.path)
-  #   return(NULL)
-  # }
-  # Read the expression data
-  # exp <- read.table(gzfile(exp.path), sep = "\t", skip = 2, header = TRUE, check.names = FALSE)
   
   # Dynamically generate the URL for the tissue
   tissue_url <- sprintf("https://storage.googleapis.com/adult-gtex/bulk-gex/v10/rna-seq/tpms-by-tissue/gene_tpm_v10_%s.gct.gz", gsub(" ", "_", tissue))
@@ -34,9 +31,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
   # Check the result
   if (is.null(exp)) {
     print("Error: Unable to download or read the file.")
-  } else {
-    # print(head(exp))  # Display the first few rows of the data
-  }
+  } 
   
   colnames(exp) <- gsub("\\.", "-", colnames(exp))
   
@@ -52,50 +47,19 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
   
   # Filter for valid TPM and age values
   exp_long <- exp_long %>% filter(!is.na(TPM), !is.na(age_plot))
-  
-  # Calculate p-values for each gene
-  # pval_df <- exp_long %>%
-  #   group_by(Description) %>%
-  #   summarise(
-  #     p_value = {
-  #       df_sub <- cur_data_all()
-  #       df_sub$logTPM <- log(df_sub$TPM + 1)
-  #       df_sub <- df_sub %>%
-  #         mutate(sex_plot = factor(sex_plot),
-  #                age_plot = factor(age_plot))
-  #       
-  #       # Check for single level in sex_plot
-  #       if (length(unique(df_sub$sex_plot)) == 1) {
-  #         fit <- lm(logTPM ~ age_plot, data = df_sub)
-  #       } else {
-  #         fit <- lm(logTPM ~ age_plot + sex_plot, data = df_sub)
-  #       }
-  #       
-  #       s <- summary(fit)$coefficients
-  #       if("age_plot" %in% rownames(s)) {
-  #         s["age_plot","Pr(>|t|)"]
-  #       } else {
-  #         NA_real_
-  #       }
-  #     },
-  #     .groups = "drop"
-  #   ) %>%
-  #   rename(Gene = Description) %>%
-  #   arrange(p_value) %>%
-  #   mutate(Rank = row_number()) %>%
-  #   select(Rank, Gene, p_value)
+
   pval_df <- exp_long %>%
     group_by(Description) %>%
     summarise(
       p_value = {
         df_sub <- cur_data()
-        df_sub$logTPM <- log(df_sub$TPM + 1)
+        df_sub$log2TPM <- log2(df_sub$TPM + 1)
         
         # Choose the appropriate model
         fit <- if (length(unique(df_sub$sex_plot)) == 1) {
-          lm(logTPM ~ age_plot, data = df_sub)
+          lm(log2TPM ~ age_plot, data = df_sub)
         } else {
-          lm(logTPM ~ age_plot + sex_plot, data = df_sub)
+          lm(log2TPM ~ age_plot + sex_plot, data = df_sub)
         }
         
         # Extract p-value using broom::tidy
@@ -108,8 +72,13 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
     ) %>%
     rename(Gene = Description) %>%
     arrange(p_value) %>%
-    mutate(Rank = row_number()) %>%
-    select(Rank, Gene, p_value)
+    mutate(
+      Rank = row_number(),
+      p_value = signif(p_value,4),
+      BH_adjusted = signif(p.adjust(p_value, method = 'BH'),4),
+      `Storey's q-value` = if (requireNamespace("qvalue", quietly = TRUE)) signif(qvalue(p_value)$qvalues,4) else NA_real_
+    ) %>%
+    select(Rank, Gene, p_value, BH_adjusted, q_value)
   
   return(pval_df)
 }
@@ -132,7 +101,7 @@ for (tissue in tissues) {
   }
   
   # Define output path and save results
-  output_path <- file.path(here::here("gtex_v10_shiny/data/p_value"), paste0(gsub(" ", "_", tissue), "_pvalue_results.csv"))
+  output_path <- file.path(here::here("data/p_value"), paste0(gsub(" ", "_", tissue), "_pvalue_results.csv"))
   
   tryCatch({
     write.csv(result, output_path, row.names = FALSE)
