@@ -1,11 +1,4 @@
-adipose subcutaneous
-adipose visceral omentum
-adrenal gland
-artery aorta
-artery coronary
-artery tibial
-bladder
-brain amygdala
+
 brain anterior cingulate cortex ba24
 brain caudate basal ganglia
 brain cerebellar hemisphere
@@ -52,3 +45,12 @@ thyroid
 uterus
 vagina
 whole blood
+
+adipose subcutaneous
+adipose visceral omentum
+adrenal gland
+artery aorta
+artery coronary
+artery tibial
+bladder
+brain amygdala

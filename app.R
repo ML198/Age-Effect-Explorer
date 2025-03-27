@@ -3,6 +3,30 @@ library(DT)         # For the datatable
 library(conflicted)
 conflicts_prefer(dplyr::filter)
 library(qvalue)
+library(shiny)
+# Load the DBI library
+library(DBI)
+
+# # Helper for getting new connection to Cloud SQL
+# getSqlConnection <- function(){
+#   con <-
+#     dbConnect(
+#       RMySQL::MySQL(),
+#       username = 'username',
+#       password = 'password',
+#       host = '127.0.0.1',
+#       dbname = 'example'
+#     ) # TODO: use a configuration group `group = "my-db")`
+#   return(con)
+# }
+# conn <- getSqlConnection()
+# res <- dbListTables(conn)
+# print(res)
+# dbDisconnect(conn) # Closes all open connections
+# data <- dbFetch(res)
+# print(data)
+# dbDisconnect(conn)
+
 
 # Set the app directory
 app_dir <- here::here()
@@ -36,7 +60,7 @@ ui <- fluidPage(
       selectInput("tissue", "Select tissue:", choices = tissues),
       actionButton("plot", "Generate Plot"),
       checkboxInput("show_pvalue", "Show P-value Analysis", value = TRUE),  # Add checkbox for p-value
-      checkboxInput("plot_type", "Show Violin & Box Plot (Uncheck for Regression Plot)", value = FALSE)
+      checkboxInput("plot_type", "Show Box Plot (Uncheck for Regression Plot)", value = FALSE)
       
     ),
     mainPanel(
@@ -88,11 +112,13 @@ server <- function(input, output, session) {
     X <- X %>%
       select(-Name, -Description) %>%
       pivot_longer(cols = everything(), names_to = "sample", values_to = "TPM") %>%
-      mutate(donor = sub("^([^.]+)\\.([^.]+).*", "\\1-\\2", sample)) %>% 
-      mutate(logTPM = log2(TPM + 1)) %>% 
-      select(donor, logTPM)
+      mutate(donor = str_replace(sample, "(^[^.]+)\\.([^.]+)\\..*", "\\1-\\2")) %>% 
+      mutate(log2TPM = log2(TPM + 1)) %>% 
+      select(donor, log2TPM)
     
-    mergedData <- left_join(X, metadata, by = "donor")
+    mergedData <- left_join(X, metadata, by = "donor") 
+    # %>% 
+    #   mutate(age = factor(age, levels = c("20-29", "30-39", "40-49", "50-59", "60-69", "70-79")))
     if (nrow(mergedData) == 0) return(NULL)
     
     return(mergedData)
@@ -113,52 +139,55 @@ server <- function(input, output, session) {
   output$tpmPlot <- renderPlot({
     df <- plotData()
     
-    # Check for errors in the reactive data
-    validate(need(!"error_msg" %in% colnames(df) || is.null(df$error_msg), df$error_msg))
-    
+    # # Check for errors in the reactive data
+    # validate(need(!"error_msg" %in% colnames(df) || is.null(df$error_msg), df$error_msg))
+
     # P-value analysis
     if (input$show_pvalue) {
       
       # Check for single level in sex_plot
       if (length(unique(df$sex_plot)) == 1) {
-        fit <- lm(logTPM ~ age_plot, data = df)
+        fit <- lm(log2TPM ~ age_plot, data = df)
       } else {
-        fit <- lm(logTPM ~ age_plot + sex_plot, data = df)
+        fit <- lm(log2TPM ~ age_plot + sex_plot, data = df)
       }
       
       coefs <- summary(fit)$coefficients
       p_val <- if ("age_plot" %in% rownames(coefs)) signif(coefs["age_plot", "Pr(>|t|)"], 4) else NA_real_
       
-      df$pred_logTPM <- predict(fit, newdata = df)
-      pval_label <- paste0("p = ", format(p_val, digits = 3, scientific = TRUE))
+      df$pred_log2TPM <- predict(fit, newdata = df)
+      pval_label <- paste0("p = ", format(p_val, digits = 4, scientific = TRUE))
       
-      ggplot(df, aes(x = age_plot, y = logTPM, color = sex_plot)) +
+      ggplot(df, aes(x = age_plot, y = log2TPM, color = sex_plot)) +
         geom_point(alpha = 0.7, size = 2) +
-        geom_line(aes(y = pred_logTPM), linewidth = 1) +
+        geom_line(aes(y = pred_log2TPM), linewidth = 1) +
         scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
-        annotate("text", x = min(df$age_plot, na.rm = TRUE) + 2, 
-                 y = max(df$logTPM, na.rm = TRUE),
+        annotate("text", x = max(as.numeric(df$age)), 
+                 y = max(df$log2TPM), 
                  label = pval_label, hjust = -3.4, vjust = -0.2) +
+        scale_x_continuous(limits = c(min(df$age_plot), max(df$age_plot))) +
         labs(title = sprintf("Expression of %s in %s", input$gene, input$tissue),
-             x = "Age", y = "logTPM") +
+             x = "Age", y = "log2TPM") +
         theme_minimal()
     } else {
       # Plot without p-value analysis
       if (input$plot_type) {
-        ggplot(df, aes(x = age_plot, y = logTPM, fill = sex_plot)) +
-          geom_violin(trim = FALSE, alpha = 0.3) +  # Violin plot with transparency
+        ggplot(df, aes(x = age_plot, y = log2TPM, fill = sex_plot)) +
           geom_boxplot(width = 0.2, alpha = 0.6) +  # Box plot on top with transparency
           scale_fill_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
           ggtitle(sprintf("Expression of %s in %s (Box & Violin Plot)", input$gene, input$tissue)) +
-          xlab("Age") + ylab("logTPM") + 
+          xlab("Age") + ylab("log2TPM") + 
+          scale_x_continuous(limits = c(min(df$age_plot), max(df$age_plot))) +
           theme_minimal()
       } else {
-        ggplot(df, aes(x = age_plot, y = logTPM, color = sex_plot)) +
+        ggplot(df, aes(x = age_plot, y = log2TPM, color = sex_plot)) +
           geom_smooth(method = "lm", formula = y ~ x, fill = "lightgray", alpha = 0.3) +
           geom_point(alpha = 0.7, size = 2) +
           scale_color_manual(name = "Sex", values = c("Male" = "steelblue", "Female" = "red")) +
           ggtitle(sprintf("Expression of %s in %s", input$gene, input$tissue)) +
-          xlab("Age") + ylab("logTPM") + theme_minimal()
+          xlab("Age") + ylab("log2TPM") + 
+          scale_x_continuous(limits = c(min(df$age_plot), max(df$age_plot))) +
+          theme_minimal()
       }
     }
   })

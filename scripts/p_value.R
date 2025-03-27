@@ -3,6 +3,7 @@ library(tidyverse)
 library(here)
 library(broom)
 library(qvalue)
+
 # Load tissue names and metadata
 app_dir <- here::here()
 data_dir <- file.path(app_dir, "data")
@@ -47,26 +48,31 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
   
   # Filter for valid TPM and age values
   exp_long <- exp_long %>% filter(!is.na(TPM), !is.na(age_plot))
-
+  
   pval_df <- exp_long %>%
     group_by(Description) %>%
     summarise(
       p_value = {
-        df_sub <- cur_data()
+        df_sub <- pick(everything())
         df_sub$log2TPM <- log2(df_sub$TPM + 1)
         
-        # Choose the appropriate model
-        fit <- if (length(unique(df_sub$sex_plot)) == 1) {
-          lm(log2TPM ~ age_plot, data = df_sub)
+        # Check for variability
+        if (sd(df_sub$log2TPM) == 0) {
+          NA_real_
         } else {
-          lm(log2TPM ~ age_plot + sex_plot, data = df_sub)
+          # Choose the appropriate model
+          fit <- if (length(unique(df_sub$sex_plot)) == 1) {
+            lm(log2TPM ~ age_plot, data = df_sub)
+          } else {
+            lm(log2TPM ~ age_plot + sex_plot, data = df_sub)
+          }
+          
+          # Extract p-value using broom::tidy
+          tidy_res <- tidy(fit)
+          age_pval <- tidy_res %>% filter(term == "age_plot") %>% pull(p.value)
+          
+          if (length(age_pval) == 0) NA_real_ else age_pval
         }
-        
-        # Extract p-value using broom::tidy
-        tidy_res <- tidy(fit)
-        age_pval <- tidy_res %>% filter(term == "age_plot") %>% pull(p.value)
-        
-        if (length(age_pval) == 0) NA_real_ else age_pval
       },
       .groups = "drop"
     ) %>%
@@ -74,11 +80,17 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
     arrange(p_value) %>%
     mutate(
       Rank = row_number(),
-      p_value = signif(p_value,4),
-      BH_adjusted = signif(p.adjust(p_value, method = 'BH'),4),
-      `Storey's q-value` = if (requireNamespace("qvalue", quietly = TRUE)) signif(qvalue(p_value)$qvalues,4) else NA_real_
-    ) %>%
-    select(Rank, Gene, p_value, BH_adjusted, q_value)
+      BH_adjusted = formatC(signif(p.adjust(p_value, method = 'BH'), 4), format = "e", digits = 4),
+      # `Storey's q-value` = ifelse(requireNamespace("qvalue", quietly = TRUE), 
+      #                             formatC(signif(qvalue(p_value)$qvalues, 4), format = "e", digits = 4), 
+      #                             NA_real_),
+      `Storey's q-value` = ifelse(requireNamespace("qvalue", quietly = TRUE), 
+                                  formatC(signif(qvalue(pval_df$p_value)$qvalues, 4), format = "e", digits = 4), 
+                                  NA_real_),
+      
+      p_value = formatC(signif(p_value, 4), format = "e", digits = 4)
+    ) %>% 
+    select(Rank, Gene, p_value, BH_adjusted, `Storey's q-value`)
   
   return(pval_df)
 }
