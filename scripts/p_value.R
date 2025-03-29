@@ -7,11 +7,13 @@ library(qvalue)
 # Load tissue names and metadata
 app_dir <- here::here()
 data_dir <- file.path(app_dir, "data")
+covariates_dir <- file.path(data_dir, "raw_data/covariates")
 p_value_dir <- file.path(data_dir, "p_value")
 
 
 tissue_file <- file.path(data_dir, "tissue_names.txt")
 tissues <- readLines(tissue_file)
+
 metadata.path <- file.path(data_dir, "Updated_GTEx_Analysis_v10_Annotations_SubjectPhenotypesDS.txt")
 metadata <- read.table(metadata.path, sep = "\t", header = TRUE)
 
@@ -33,21 +35,38 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
   if (is.null(exp)) {
     print("Error: Unable to download or read the file.")
   } 
-  
-  colnames(exp) <- gsub("\\.", "-", colnames(exp))
+
+  covariates.path <- file.path(covariates_dir, sprintf("%s.v10.covariates.csv", gsub(" ", "_", gsub("\\b([a-z])", "\\U\\1", tissue, perl = TRUE)
+  )))
+  if (!file.exists(covariates.path)) return(NULL)
+  covariates <- read.table(covariates.path, sep = "\t", skip = 1, header = TRUE) 
+  colnames(covariates)[1] <- "donor"
   
   # Extract sample columns and pivot to long format
   sample_cols <- colnames(exp)[-(1:2)]
   exp_long <- exp %>%
     select(Name, Description, all_of(sample_cols)) %>%
-    pivot_longer(cols = all_of(sample_cols), names_to = "sample", values_to = "TPM")
-  
-  # Add donor information from metadata
-  exp_long$donor <- sapply(strsplit(exp_long$sample, "-"), function(v) paste(v[1], v[2], sep = "-"))
-  exp_long <- exp_long %>% left_join(metadata, by = "donor")
-  
+    pivot_longer(cols = all_of(sample_cols), names_to = "sample", values_to = "TPM") %>% 
+    # Add donor information from metadata
+    mutate(donor = gsub("\\.", "-", sapply(strsplit(sample, "\\."), function(x) paste(x[1:2], collapse = "-")))) %>% 
+    # merge with metadata
+    left_join(metadata, by = "donor") %>% 
+    # merge with covariates data
+    left_join(covariates, by )
+    
+
   # Filter for valid TPM and age values
   exp_long <- exp_long %>% filter(!is.na(TPM), !is.na(age_plot))
+  
+  
+  # exp.path <- file.path(raw_data_dir, sprintf("gene_tpm_v10_%s.gct.gz", gsub(" ", "_", tissue)))
+  # if (!file.exists(exp.path)) return(NULL)
+  # exp <- read.table(gzfile(exp.path), sep = "\t", skip = 2, header = TRUE)
+  
+  covariates.path <- file.path(covariates_dir, sprintf("%s.v10.covariates.csv", gsub(" ", "_", gsub("\\b([a-z])", "\\U\\1", tissue, perl = TRUE)
+)))
+  if (!file.exists(covariates.path)) return(NULL)
+  covariates <- read.table(gzfile(covariates.path), sep = "\t", skip = 2, header = FALSE)
   
   pval_df <- exp_long %>%
     group_by(Description) %>%
@@ -85,7 +104,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       #                             formatC(signif(qvalue(p_value)$qvalues, 4), format = "e", digits = 4), 
       #                             NA_real_),
       `Storey's q-value` = ifelse(requireNamespace("qvalue", quietly = TRUE), 
-                                  formatC(signif(qvalue(pval_df$p_value)$qvalues, 4), format = "e", digits = 4), 
+                                  formatC(signif(qvalue(p_value)$qvalues, 4), format = "e", digits = 4), 
                                   NA_real_),
       
       p_value = formatC(signif(p_value, 4), format = "e", digits = 4)
