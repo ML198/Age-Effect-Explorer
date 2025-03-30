@@ -27,6 +27,10 @@ txt_files <- list.files(covariates_dir, pattern = "\\.csv$", full.names = TRUE)
 
 cat("All .txt files have been renamed to .csv.")
 
+# load the metadata
+metadata.path <- file.path(data_dir, "Updated_gtex_v10_metadata_exact.csv")
+metadata <- read.table(metadata.path, sep = "\t", header = TRUE) %>% select(donor, sex, age)
+
 transpose_and_overwrite <- function(file) {
   data <- read.table(file, header = TRUE, sep = "\t", check.names = FALSE)
   
@@ -42,9 +46,18 @@ transpose_and_overwrite <- function(file) {
   colnames(transposed_data) <- c("donor", as.character(data[, 1]))
   rownames(transposed_data) <- seq_len(nrow(transposed_data))
   
+  # Get the overlapping column names (excluding "donor")
+  overlapping_cols <- intersect(names(metadata), names(transposed_data))
+  overlapping_cols <- overlapping_cols[overlapping_cols != "donor"]
+  
+  # Remove overlapping columns from covariates
+  covariates_filtered <- transposed_data %>%
+    select(-all_of(overlapping_cols))
+  
   # Overwrite the file
-  write.table(transposed_data, file, sep = "\t", quote = FALSE, row.names = FALSE)
+  write.table(covariates_filtered, file, sep = "\t", quote = FALSE, row.names = FALSE)
   cat("File overwritten with transposed data:", file, "\n")
+  dim(covariates_filtered)
 }
 # Apply the function to all .txt files
 lapply(txt_files, transpose_and_overwrite)
