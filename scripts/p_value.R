@@ -3,7 +3,6 @@ library(tidyverse)
 library(here)
 library(broom)
 library(qvalue)
-library(data.table) 
 # Load tissue names and metadata
 app_dir <- here::here()
 data_dir <- file.path(app_dir, "data")
@@ -54,15 +53,19 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
     summarise(
       p_value = {
         df_sub <- pick(everything()) %>% 
-          mutate(log2TPM = log2(TPM + 1)) %>% 
-          select(-c(TPM))
+          mutate(log2TPM = log2(TPM + 1),
+                 sex = as.factor(sex)) %>% 
+          select(-c(TPM)) 
+          
+          
         
         # Check if covariates table exists and donor column matches
-        if (file.exists(covariates.path) && "donor" %in% colnames(covariates)) {
+        # if (file.exists(covariates.path) && "donor" %in% colnames(covariates)) {
+        if (file.exists(covariates.path)){
           covariates <- read.table(covariates.path, sep = "\t", header = TRUE) 
-          df_sub <- left_join(df_sub, covariates, by = "donor")
+          df_sub <- left_join(df_sub, covariates, by = "donor") 
         } else {
-          df_sub <- df_sub
+          df_sub <- df_sub 
         }
         
         # Check for variability
@@ -73,8 +76,12 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
           skip_to_next <- FALSE
           fit <- tryCatch({
             if (length(unique(df_sub$sex)) == 1) {
-              lm(log2TPM ~ age, data = df_sub)
+              # Remove rows with NA values, as lm() will fail with NAs
+              lm(log2TPM ~ age, data = df_sub %>% na.omit())
             } else {
+              # remove donor and Description in model building 
+              lm(log2TPM ~ ., data = df_sub %>% select(-c(donor, Description)) %>% na.omit())
+              
             }
           }, error = function(e) {
             skip_to_next <<- TRUE
