@@ -52,54 +52,55 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
     group_by(Description) %>%
     summarise(
       p_value = {
-        df_sub <- pick(everything()) %>% 
-          mutate(log2TPM = log2(TPM + 1),
-                 sex = as.factor(sex)) %>% 
-          select(-c(TPM)) 
-          
-          
+        df_sub <- cur_data() %>%
+          mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
         
-        # Check if covariates table exists and donor column matches
-        # if (file.exists(covariates.path) && "donor" %in% colnames(covariates)) {
-        if (file.exists(covariates.path)){
-          covariates <- read.table(covariates.path, sep = "\t", header = TRUE) 
-          df_sub <- left_join(df_sub, covariates, by = "donor") 
-        } else {
-          df_sub <- df_sub 
+        if (file.exists(covariates.path)) {
+          covariates <- read.table(covariates.path, sep = "\t", header = TRUE)
+          df_sub <- left_join(df_sub, covariates, by = "donor")
         }
         
-        # Check for variability
         if (sd(df_sub$log2TPM) < 1e-6) {
           NA_real_
         } else {
-          # Use tryCatch to avoid errors
-          skip_to_next <- FALSE
-          fit <- tryCatch({
-            if (length(unique(df_sub$sex)) == 1) {
-              # Remove rows with NA values, as lm() will fail with NAs
-              lm(log2TPM ~ age, data = df_sub %>% na.omit())
-            } else {
-              # remove donor and Description in model building 
-              lm(log2TPM ~ ., data = df_sub %>% select(-c(donor, Description)) %>% na.omit())
-              
-            }
-          }, error = function(e) {
-            skip_to_next <<- TRUE
-            NULL
-          })
+          remaining_vars <- setdiff(names(df_sub), c("donor", "Description", "TPM", "log2TPM"))
           
-          if (skip_to_next || is.null(fit)) {
+          if (length(remaining_vars) == 0 || nrow(df_sub %>% na.omit()) == 0) {
             NA_real_
           } else {
-            # Extract p-value using broom::tidy
-            tidy_res <- tidy(fit)
-            age_pval <- tidy_res %>% filter(term == "age") %>% pull(p.value)
-            if (length(age_pval) == 0) NA_real_ else age_pval
+            fit <- tryCatch({
+              lm(as.formula(paste("log2TPM ~", paste(remaining_vars, collapse = " + "))),
+                 data = df_sub %>% na.omit()
+              )
+              # lm(log2TPM ~ age + sex, data = df_sub %>% na.omit())
+            }, error = function(e) {
+              print(paste("Error for gene:", first(df_sub$Description), "- Error Message:", e$message))
+              NULL
+            })
+            
+            if (is.null(fit)) {
+              NA_real_
+            } else {
+              tidy_res <- tryCatch({
+                tidy(fit)
+              }, error = function(e){
+                print(paste("Error during tidy for gene:", first(df_sub$Description), "- Error Message:", e$message))
+                NULL
+              })
+              
+              if(is.null(tidy_res)){
+                NA_real_
+              } else{
+                age_pval <- tidy_res %>% filter(term == "age") %>% pull(p.value)
+                if (length(age_pval) == 0) NA_real_ else age_pval
+              }
+            }
           }
         }
       },
       .groups = "drop"
-    ) %>%
+    ) 
+  # %>%
     rename(Gene = Description) %>%
     arrange(p_value) %>%
     mutate(
