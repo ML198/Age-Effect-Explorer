@@ -99,8 +99,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
         }
       },
       .groups = "drop"
-    ) 
-  # %>%
+    ) %>%
     rename(Gene = Description) %>%
     arrange(p_value) %>%
     mutate(
