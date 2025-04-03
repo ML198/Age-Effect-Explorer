@@ -12,7 +12,7 @@ p_value_dir <- file.path(data_dir, "p_value")
 
 tissue_file <- file.path(data_dir, "tissue_names.txt")
 tissues <- readLines(tissue_file)
-
+# tissues <- (c("cervix ectocervix", "cervix endocervix", "fallopian tube", "ovary", "prostate", "testis", "uterus", "vagina"))
 metadata.path <- file.path(data_dir, "Updated_gtex_v10_metadata_exact.csv")
 metadata <- read.table(metadata.path, sep = "\t", header = TRUE) %>% select(donor, sex, age)
 
@@ -55,6 +55,10 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
         df_sub <- cur_data() %>%
           mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
         
+        # df_sub <- exp_long %>%
+        #   filter(Description == "LINC01214")  %>%
+        #   mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
+        
         if (file.exists(covariates.path)) {
           covariates <- read.table(covariates.path, sep = "\t", header = TRUE)
           df_sub <- left_join(df_sub, covariates, by = "donor")
@@ -64,6 +68,10 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
           NA_real_
         } else {
           remaining_vars <- setdiff(names(df_sub), c("donor", "Description", "TPM", "log2TPM"))
+          # Remove sex if it has only one level
+          if (length(unique(df_sub$sex)) < 2) {
+            remaining_vars <- setdiff(remaining_vars, "sex")
+          }
           
           if (length(remaining_vars) == 0 || nrow(df_sub %>% na.omit()) == 0) {
             NA_real_
