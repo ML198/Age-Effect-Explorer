@@ -50,73 +50,77 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
   
   pval_df <- exp_long %>%
     group_by(Description) %>%
-    summarise(
-      p_value = {
-        df_sub <- cur_data() %>%
-          mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
-        
-        # df_sub <- exp_long %>%
-        #   filter(Description == "LINC01214")  %>%
-        #   mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
-        
-        if (file.exists(covariates.path)) {
-          covariates <- read.table(covariates.path, sep = "\t", header = TRUE)
-          df_sub <- left_join(df_sub, covariates, by = "donor")
-        }
-        
-        if (sd(df_sub$log2TPM) < 1e-6) {
-          NA_real_
-        } else {
-          remaining_vars <- setdiff(names(df_sub), c("donor", "Description", "TPM", "log2TPM"))
-          # Remove sex if it has only one level
-          if (length(unique(df_sub$sex)) < 2) {
-            remaining_vars <- setdiff(remaining_vars, "sex")
-          }
-          
-          if (length(remaining_vars) == 0 || nrow(df_sub %>% na.omit()) == 0) {
-            NA_real_
-          } else {
-            fit <- tryCatch({
-              lm(as.formula(paste("log2TPM ~", paste(remaining_vars, collapse = " + "))),
-                 data = df_sub %>% na.omit()
-              )
-              # lm(log2TPM ~ age + sex, data = df_sub %>% na.omit())
-            }, error = function(e) {
-              print(paste("Error for gene:", first(df_sub$Description), "- Error Message:", e$message))
-              NULL
-            })
-            
-            if (is.null(fit)) {
-              NA_real_
-            } else {
-              tidy_res <- tryCatch({
-                tidy(fit)
-              }, error = function(e){
-                print(paste("Error during tidy for gene:", first(df_sub$Description), "- Error Message:", e$message))
-                NULL
-              })
-              
-              if(is.null(tidy_res)){
-                NA_real_
-              } else{
-                age_pval <- tidy_res %>% filter(term == "age") %>% pull(p.value)
-                if (length(age_pval) == 0) NA_real_ else age_pval
-              }
-            }
-          }
-        }
-      },
-      .groups = "drop"
+    group_modify(~ {
+      df_sub <- .x %>%
+        mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
+      
+      # df_sub <- exp_long %>%
+      #   filter(Description == "LINC01214")  %>%
+      #   mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
+      
+      # Check if covariates file exists, and merge with the data if available
+      if (file.exists(covariates.path)) {
+        covariates <- read.table(covariates.path, sep = "\t", header = TRUE)
+        df_sub <- left_join(df_sub, covariates, by = "donor")
+      }
+      
+      # If the standard deviation of log2TPM is too small, skip analysis
+      if (nrow(df_sub) == 0 || sd(df_sub$log2TPM, na.rm = TRUE) < 1e-6) {
+        return(tibble(p_value = NA_real_, age_coef = NA_real_, sign_age = NA_real_))
+      }
+      
+      # Identify remaining variables for the regression model
+      remaining_vars <- setdiff(names(df_sub), c("donor", "Description", "TPM", "log2TPM"))
+      
+      # Remove sex if it has only one level
+      if (length(unique(df_sub$sex)) < 2) {
+        remaining_vars <- setdiff(remaining_vars, "sex")
+      }
+      
+      # If no remaining variables or if data has too many missing values, return NAs
+      if (length(remaining_vars) == 0 || nrow(na.omit(df_sub)) == 0) {
+        return(tibble(p_value = NA_real_, age_coef = NA_real_, sign_age = NA_real_))
+      } 
+      
+      fit <- tryCatch({
+        lm(as.formula(paste("log2TPM ~", paste(remaining_vars, collapse = " + "))), data = na.omit(df_sub))
+      }, error = function(e) NULL)
+      
+      if (is.null(fit)) {
+        return(tibble(p_value = NA_real_, age_coef = NA_real_, sign_age = NA_real_))
+      } 
+      
+      # Extract tidy results from the model and handle errors
+      tidy_res <- tryCatch({ tidy(fit) }, error = function(e) NULL)
+      
+      # If tidy results are missing, return NAs
+      if (is.null(tidy_res)) {
+        return(tibble(p_value = NA_real_, age_coef = NA_real_, sign_age = NA_real_))
+      }
+      age_pval <- tidy_res %>% filter(term == "age") %>% pull(p.value)
+      age_coef <- coef(fit)["age"]
+      age_sign <- sign(age_coef)
+      
+      # Return p-value, coefficient for age, and sign of the age coefficient
+      tibble(
+        p_value = if (length(age_pval) == 0) NA_real_ else age_pval,
+        age_coef = if ("age" %in% names(coef(fit))) coef(fit)["age"] else NA_real_,
+        sign_age = if (length(age_sign) == 0) NA_real_ else age_sign
+      )
+    },
+    .groups = "drop"
     ) %>%
     rename(Gene = Description) %>%
+    # filter(!is.na(p_value)) %>%  
     arrange(p_value) %>%
     mutate(
       Rank = row_number(),
-      BH_adjusted = formatC(signif(p.adjust(p_value, method = 'BH'), 4), format = "e", digits = 4),
-      `Storey's q-value` = formatC(signif(qvalue(p_value)$qvalues, 4), format = "e", digits = 4),
-      p_value = formatC(signif(p_value, 4), format = "e", digits = 4)
-    ) %>% 
-    select(Rank, Gene, p_value, BH_adjusted, `Storey's q-value`)
+      BH_adjusted = formatC(signif(p.adjust(p_value, method = 'BH'), 3), format = "e", digits = 3),
+      # `Storey's q-value` = formatC(signif(qvalue(p_value)$qvalues, 3), format = "e", digits = 3),
+      p_value = formatC(signif(p_value, 3), format = "e", digits = 3)
+    ) %>%
+    select(Rank, Gene, p_value, BH_adjusted, age_coef, sign_age)
+    # select(Rank, Gene, p_value, BH_adjusted, `Storey's q-value`, age_coef, sign_age)
   
   return(pval_df)
 }
