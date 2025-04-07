@@ -109,19 +109,21 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       )
     },
     .groups = "drop"
-    ) %>%
+    )  %>%
+    ungroup() %>%
     rename(Gene = Description) %>%
-    # filter(!is.na(p_value)) %>%  
     arrange(p_value) %>%
     mutate(
       Rank = row_number(),
-      BH_adjusted = formatC(signif(p.adjust(p_value, method = 'BH'), 3), format = "e", digits = 3),
+      BH_adjusted = p.adjust(p_value, method = 'BH')
+    ) %>%
+    mutate(
+      p_value = formatC(signif(p_value, 3), format = "e", digits = 3),
       # `Storey's q-value` = formatC(signif(qvalue(p_value)$qvalues, 3), format = "e", digits = 3),
-      p_value = formatC(signif(p_value, 3), format = "e", digits = 3)
+      BH_adjusted = formatC(signif(BH_adjusted, 3), format = "e", digits = 3)
     ) %>%
     select(Rank, Gene, p_value, BH_adjusted, age_coef, sign_age)
-    # select(Rank, Gene, p_value, BH_adjusted, `Storey's q-value`, age_coef, sign_age)
-  
+  # select(Rank, Gene, p_value, BH_adjusted, `Storey's q-value`, age_coef, sign_age)
   return(pval_df)
 }
 
