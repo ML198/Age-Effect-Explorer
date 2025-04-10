@@ -55,7 +55,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
         mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
       
       # df_sub <- exp_long %>%
-      #   filter(Description == "LINC01214")  %>%
+      #   filter(Description == "ENSG00000285933")  %>%
       #   mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
       
       # Check if covariates file exists, and merge with the data if available
@@ -66,7 +66,8 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       
       # If the standard deviation of log2TPM is too small, skip analysis
       if (nrow(df_sub) == 0 || sd(df_sub$log2TPM, na.rm = TRUE) < 1e-6) {
-        return(tibble(p_value = NA_real_, age_coef = NA_real_, sign_age = NA_real_))
+        return(tibble(p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_))
+        # return(tibble(p_value = NA_real_, age_coef = NA_real_))
       }
       
       # Identify remaining variables for the regression model
@@ -79,7 +80,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       
       # If no remaining variables or if data has too many missing values, return NAs
       if (length(remaining_vars) == 0 || nrow(na.omit(df_sub)) == 0) {
-        return(tibble(p_value = NA_real_, age_coef = NA_real_, sign_age = NA_real_))
+        return(tibble(p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_))
       } 
       
       fit <- tryCatch({
@@ -87,7 +88,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       }, error = function(e) NULL)
       
       if (is.null(fit)) {
-        return(tibble(p_value = NA_real_, age_coef = NA_real_, sign_age = NA_real_))
+        return(tibble(p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_))
       } 
       
       # Extract tidy results from the model and handle errors
@@ -95,36 +96,36 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       
       # If tidy results are missing, return NAs
       if (is.null(tidy_res)) {
-        return(tibble(p_value = NA_real_, age_coef = NA_real_, sign_age = NA_real_))
+        return(tibble(p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_))
       }
-      age_pval <- tidy_res %>% filter(term == "age") %>% pull(p.value)
+      p_value <- tidy_res %>% filter(term == "age") %>% pull(p.value)
       age_coef <- coef(fit)["age"]
       age_sign <- sign(age_coef)
       
       # Return p-value, coefficient for age, and sign of the age coefficient
       tibble(
-        p_value = if (length(age_pval) == 0) NA_real_ else age_pval,
+        p_value = if (length(p_value) == 0) NA_real_ else p_value,
         age_coef = if ("age" %in% names(coef(fit))) coef(fit)["age"] else NA_real_,
-        sign_age = if (length(age_sign) == 0) NA_real_ else age_sign
+        age_sign = if (length(age_sign) == 0) NA_real_ else age_sign
       )
     },
     .groups = "drop"
-    )  %>%
+    ) %>%
     ungroup() %>%
     rename(Gene = Description) %>%
     arrange(p_value) %>%
     mutate(
       Rank = row_number(),
-      BH_adjusted = p.adjust(p_value, method = 'BH')
+      BH_adjusted_pval = p.adjust(p_value, method = 'BH')
     ) %>%
     mutate(
-      p_value = formatC(signif(p_value, 3), format = "e", digits = 3),
       # `Storey's q-value` = formatC(signif(qvalue(p_value)$qvalues, 3), format = "e", digits = 3),
-      BH_adjusted = formatC(signif(BH_adjusted, 3), format = "e", digits = 3)
+      p_value    = formatC(signif(p_value,4), format = "e", digits = 4),
+      BH_adjusted_pval = formatC(signif(BH_adjusted_pval, 4), format = "e", digits = 4),
+      age_coef   = formatC(signif(age_coef, 4), format = "e", digits = 4)
     ) %>%
-    select(Rank, Gene, p_value, BH_adjusted, age_coef, sign_age)
-  # select(Rank, Gene, p_value, BH_adjusted, `Storey's q-value`, age_coef, sign_age)
-  return(pval_df)
+    select(Rank, Gene, p_value, BH_adjusted_pval, age_coef, age_sign)
+   return(pval_df)
 }
 
 # Loop through tissues and process each one
