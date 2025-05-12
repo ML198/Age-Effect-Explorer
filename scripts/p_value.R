@@ -120,7 +120,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
     .groups = "drop"
     ) %>%
     ungroup() %>%
-    rename(Gene = Description) %>%
+    rename(Gene = Description, Sex = sex) %>%
     arrange(p_value) %>%
     mutate(
       Rank = row_number(),
@@ -132,7 +132,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       BH_adjusted_pval = formatC(signif(BH_adjusted_pval, 4), format = "e", digits = 4),
       age_coef   = formatC(signif(age_coef, 4), format = "e", digits = 4)
     ) %>%
-    select(Rank, Gene, p_value, BH_adjusted_pval, age_coef, age_sign)
+    select(Rank, Sex, Gene, p_value, BH_adjusted_pval, age_coef, age_sign)
    return(pval_df)
 }
 
