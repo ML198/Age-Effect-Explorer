@@ -44,38 +44,45 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
     mutate(donor = str_replace_all(str_extract(sample, "^[^.]+\\.[^.]+"), "\\.", "-")) %>% 
     select(donor, Description, TPM) %>% 
     # merge with metadata
-    left_join(metadata, by = "donor") 
+    left_join(metadata, by = "donor") %>% 
+    group_by(sex, Description)
+    
   
   covariates.path <- file.path(covariates_dir, sprintf("%s.v10.covariates.csv", gsub(" ", "_", gsub("\\b([a-z])", "\\U\\1", tissue, perl = TRUE))))
   
   pval_df <- exp_long %>%
-    group_by(Description) %>%
+    mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex)) %>% 
+    group_by(sex, Description) %>%
     group_modify(~ {
-      df_sub <- .x %>%
-        mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
+      df_sub <- .x
       
       # df_sub <- exp_long %>%
-      #   filter(Description == "ENSG00000285933")  %>%
+      #   filter(Description == "MT-CO3", sex == "Male")  %>%
       #   mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
       
-      # Check if covariates file exists, and merge with the data if available
+      # merge covariates if available
       if (file.exists(covariates.path)) {
         covariates <- read.table(covariates.path, sep = "\t", header = TRUE)
         df_sub <- left_join(df_sub, covariates, by = "donor")
       }
       
-      # If the standard deviation of log2TPM is too small, skip analysis
+      # skip if TPM is too constant
       if (nrow(df_sub) == 0 || sd(df_sub$log2TPM, na.rm = TRUE) < 1e-6) {
         return(tibble(p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_))
         # return(tibble(p_value = NA_real_, age_coef = NA_real_))
       }
       
-      # Identify remaining variables for the regression model
-      remaining_vars <- setdiff(names(df_sub), c("donor", "Description", "TPM", "log2TPM"))
+      # get model variables
+      remaining_vars <- setdiff(names(df_sub), c("donor", "Description", "TPM", "log2TPM", "sex"))
       
       # Remove sex if it has only one level
-      if (length(unique(df_sub$sex)) < 2) {
-        remaining_vars <- setdiff(remaining_vars, "sex")
+      # if (length(unique(df_sub$sex)) < 2) {
+      #   remaining_vars <- setdiff(remaining_vars, "sex")
+      # }
+      if (!("age" %in% remaining_vars)) {
+        return(tibble(
+          sex = unique(df_sub$sex), p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_
+        ))
       }
       
       # If no remaining variables or if data has too many missing values, return NAs
@@ -104,6 +111,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       
       # Return p-value, coefficient for age, and sign of the age coefficient
       tibble(
+        sex = unique(df_sub$sex),  # 保留性别信息
         p_value = if (length(p_value) == 0) NA_real_ else p_value,
         age_coef = if ("age" %in% names(coef(fit))) coef(fit)["age"] else NA_real_,
         age_sign = if (length(age_sign) == 0) NA_real_ else age_sign
