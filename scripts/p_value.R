@@ -49,13 +49,13 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
   covariates.path <- file.path(covariates_dir, sprintf("%s.v10.covariates.csv", gsub(" ", "_", gsub("\\b([a-z])", "\\U\\1", tissue, perl = TRUE))))
   
   pval_df <- exp_long %>%
+    mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex)) %>%
     group_by(Description) %>%
     group_modify(~ {
-      df_sub <- .x %>%
-        mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
+      df_sub <- .x 
       
       # df_sub <- exp_long %>%
-      #   filter(Description == "ENSG00000285933")  %>%
+      #   filter(Description == "DDX3Y")  %>%
       #   mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
       
       # Check if covariates file exists, and merge with the data if available
@@ -66,29 +66,32 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       
       # If the standard deviation of log2TPM is too small, skip analysis
       if (nrow(df_sub) == 0 || sd(df_sub$log2TPM, na.rm = TRUE) < 1e-6) {
-        return(tibble(p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_))
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, sex_bias = NA_character_))
         # return(tibble(p_value = NA_real_, age_coef = NA_real_))
       }
       
       # Identify remaining variables for the regression model
-      remaining_vars <- setdiff(names(df_sub), c("donor", "Description", "TPM", "log2TPM"))
+      model_vars <- setdiff(names(df_sub), c("donor", "Description", "TPM", "log2TPM"))
+      if (!all(c("age", "sex") %in% model_vars)) {
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, sex_bias = NA_character_))
+      }
       
       # Remove sex if it has only one level
-      if (length(unique(df_sub$sex)) < 2) {
-        remaining_vars <- setdiff(remaining_vars, "sex")
+      if (length(unique(df_sub$sex)) == 1) {
+        model_vars <- setdiff(model_vars, "sex")
       }
       
       # If no remaining variables or if data has too many missing values, return NAs
-      if (length(remaining_vars) == 0 || nrow(na.omit(df_sub)) == 0) {
-        return(tibble(p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_))
+      if (length(model_vars) == 0 || nrow(na.omit(df_sub)) == 0) {
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, sex_bias = NA_character_))
       } 
       
       fit <- tryCatch({
-        lm(as.formula(paste("log2TPM ~", paste(remaining_vars, collapse = " + "))), data = na.omit(df_sub))
+        lm(as.formula(paste("log2TPM ~", paste(model_vars, collapse = " + "))), data = na.omit(df_sub))
       }, error = function(e) NULL)
       
       if (is.null(fit)) {
-        return(tibble(p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_))
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, sex_bias = NA_character_))
       } 
       
       # Extract tidy results from the model and handle errors
@@ -96,35 +99,54 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       
       # If tidy results are missing, return NAs
       if (is.null(tidy_res)) {
-        return(tibble(p_value = NA_real_, age_coef = NA_real_, age_sign = NA_real_))
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, sex_bias = NA_character_))
       }
-      p_value <- tidy_res %>% filter(term == "age") %>% pull(p.value)
+      p_value_age <- tidy_res %>% filter(term == "age") %>% pull(p.value)
+      p_value_sex <- tidy_res %>% filter(term == "sexMale") %>% pull(p.value)
       age_coef <- coef(fit)["age"]
       age_sign <- sign(age_coef)
+      sex_coef <- coef(fit)["sexMale"]
+      sex_bias <- case_when(
+        sex_coef > 0 ~ "Male",
+        sex_coef < 0 ~ "Female",
+        is.na(sex_coef) ~ NA_character_,
+        TRUE ~ NA_character_
+      )
+      
       
       # Return p-value, coefficient for age, and sign of the age coefficient
       tibble(
-        p_value = if (length(p_value) == 0) NA_real_ else p_value,
-        age_coef = if ("age" %in% names(coef(fit))) coef(fit)["age"] else NA_real_,
-        age_sign = if (length(age_sign) == 0) NA_real_ else age_sign
+        p_value_age = if (length(p_value_age) == 0) NA_real_ else p_value_age,
+        p_value_sex = if (length(p_value_sex) == 0) NA_real_ else p_value_sex,
+        age_coef = if (is.null(age_coef)) NA_real_ else age_coef,
+        age_sign = if (is.null(age_sign)) NA_real_ else age_sign,
+        sex_coef = if (is.null(sex_coef)) NA_real_ else sex_coef,
+        sex_bias = sex_bias
       )
     },
     .groups = "drop"
     ) %>%
     ungroup() %>%
     rename(Gene = Description) %>%
-    arrange(p_value) %>%
+    arrange(p_value_age) %>%
     mutate(
       Rank = row_number(),
-      BH_adjusted_pval = p.adjust(p_value, method = 'BH')
+      BH_adjusted_age = p.adjust(p_value_age, method = 'BH'),
+      BH_adjusted_sex = p.adjust(p_value_sex, method = 'BH')
     ) %>%
     mutate(
       # `Storey's q-value` = formatC(signif(qvalue(p_value)$qvalues, 3), format = "e", digits = 3),
-      p_value    = formatC(signif(p_value,4), format = "e", digits = 4),
-      BH_adjusted_pval = formatC(signif(BH_adjusted_pval, 4), format = "e", digits = 4),
-      age_coef   = formatC(signif(age_coef, 4), format = "e", digits = 4)
+      p_value_age = formatC(signif(p_value_age,4), format = "e", digits = 4),
+      BH_adjusted_age = formatC(signif(BH_adjusted_age, 4), format = "e", digits = 4),
+      age_coef = formatC(signif(age_coef, 4), format = "e", digits = 4),
+      
+      p_value_sex = formatC(signif(p_value_sex,4), format = "e", digits = 4),
+      BH_adjusted_sex = formatC(signif(BH_adjusted_sex, 4), format = "e", digits = 4),
+      sex_coef = formatC(signif(sex_coef, 4), format = "e", digits = 4),
+      
     ) %>%
-    select(Rank, Gene, p_value, BH_adjusted_pval, age_coef, age_sign)
+    select(Rank, Gene, p_value_age, BH_adjusted_age, age_coef, age_sign, p_value_sex, BH_adjusted_sex, sex_coef, sex_bias)
+  
    return(pval_df)
 }
 
