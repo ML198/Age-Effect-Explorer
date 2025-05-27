@@ -49,7 +49,6 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
     
   
   covariates.path <- file.path(covariates_dir, sprintf("%s.v10.covariates.csv", gsub(" ", "_", gsub("\\b([a-z])", "\\U\\1", tissue, perl = TRUE))))
-  
   pval_df <- exp_long %>%
     mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex)) %>%
     group_by(Description) %>%
@@ -57,7 +56,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       df_sub <- .x 
       
       # df_sub <- exp_long %>%
-      #   filter(Description == "DDX3Y")  %>%
+      #   filter(Description == "5_8S_rRNA")  %>%
       #   mutate(log2TPM = log2(TPM + 1), sex = as.factor(sex))
       
       # merge covariates if available
@@ -67,15 +66,15 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       }
       
       # skip if TPM is too constant
-      if (nrow(df_sub) == 0 || sd(df_sub$log2TPM, na.rm = TRUE) < 1e-6) {
-        return(tibble(intercept = NA_real_, p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_))
+      if (nrow(df_sub) == 0 || sd(df_sub$log2TPM, na.rm = TRUE) < 1e-6 || mean(df_sub$log2TPM == 0, na.rm = TRUE) > 0.1) {
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_, `age effect` = NA_character_))
         # return(tibble(p_value = NA_real_, age_coef = NA_real_))
       }
       
       # Identify remaining variables for the regression model
       model_vars <- setdiff(names(df_sub), c("donor", "Description", "TPM", "log2TPM"))
       if (!all(c("age", "sex") %in% model_vars)) {
-        return(tibble(intercept = NA_real_, p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_))
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_, `age effect` = NA_character_))
       }
       
       # Remove sex if it has only one level
@@ -85,7 +84,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       
       # If no remaining variables or if data has too many missing values, return NAs
       if (length(model_vars) == 0 || nrow(na.omit(df_sub)) == 0) {
-        return(tibble(intercept = NA_real_, p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_))
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_, `age effect` = NA_character_))
       } 
       
       fit <- tryCatch({
@@ -93,7 +92,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       }, error = function(e) NULL)
       
       if (is.null(fit)) {
-        return(tibble(intercept = NA_real_, p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_))
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_, `age effect` = NA_character_))
       } 
       
       # Extract tidy results from the model and handle errors
@@ -101,16 +100,14 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       
       # If tidy results are missing, return NAs
       if (is.null(tidy_res)) {
-        return(tibble(intercept = NA_real_, p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_))
+        return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_, `age effect` = NA_character_))
       }
-      
       intercept <- coef(fit)["(Intercept)"]
-      
       p_value_age <- tidy_res %>% filter(term == "age") %>% pull(p.value)
       p_value_sex <- tidy_res %>% filter(term == "sexMale") %>% pull(p.value)
       age_coef <- coef(fit)["age"]
       `age effect` <- ifelse(is.na(age_coef), NA_character_,
-                                            ifelse(sign(age_coef) > 0, "UP", "DOWN"))
+                             ifelse(sign(age_coef) > 0, "UP", "DOWN"))
       sex_coef <- coef(fit)["sexMale"]
       `sex effect` <- first(case_when(
         length(unique(df_sub$sex)) == 1 ~ as.character(unique(df_sub$sex)),
@@ -119,10 +116,9 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
         TRUE ~ NA_character_
       ))
       
-      
       # Return p-value, coefficient for age, and sign of the age coefficient
       tibble(
-        intercept = if (is.null(intercept)) NA_real_ else intercept,
+        intercept = if (length(intercept) == 0) NA_real_ else intercept,
         p_value_age = if (length(p_value_age) == 0) NA_real_ else p_value_age,
         p_value_sex = if (length(p_value_sex) == 0) NA_real_ else p_value_sex,
         age_coef = if (is.null(age_coef)) NA_real_ else age_coef,
@@ -142,18 +138,21 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       BH_adjusted_sex = p.adjust(p_value_sex, method = 'BH')
     ) %>%
     mutate(
-      # `Storey's q-value` = formatC(signif(qvalue(p_value)$qvalues, 3), format = "e", digits = 3),
-      p_value_age = formatC(signif(p_value_age,3), format = "e", digits = 3),
-      BH_adjusted_age = formatC(signif(BH_adjusted_age, 3), format = "e", digits = 3),
-      age_coef = formatC(signif(age_coef, 3), format = "e", digits = 3),
+      intercept = formatC(signif(intercept,2), format = "e", digits = 2),
+      # `Storey's q-value` = formatC(signif(qvalue(p_value)$qvalues, 2), format = "e", digits = 2),
+      p_value_age = formatC(signif(p_value_age,2), format = "e", digits = 2),
+      BH_adjusted_age = formatC(signif(BH_adjusted_age, 2), format = "e", digits = 2),
+      age_coef = formatC(signif(age_coef, 2), format = "e", digits = 2),
       
-      p_value_sex = formatC(signif(p_value_sex,3), format = "e", digits = 3),
-      BH_adjusted_sex = formatC(signif(BH_adjusted_sex, 3), format = "e", digits = 3),
-      sex_coef = formatC(signif(sex_coef, 3), format = "e", digits = 3),
+      p_value_sex = formatC(signif(p_value_sex,2), format = "e", digits = 2),
+      BH_adjusted_sex = formatC(signif(BH_adjusted_sex, 2), format = "e", digits = 2),
+      sex_coef = formatC(signif(sex_coef, 2), format = "e", digits = 2),
       
     ) %>%
-    select(Rank, Gene, p_value_age, BH_adjusted_age, age_coef, `age effect`, p_value_sex, BH_adjusted_sex, sex_coef, `sex effect`)
-     return(pval_df)
+    select(Rank, Gene, intercept, p_value_age, BH_adjusted_age, age_coef, `age effect`, p_value_sex, BH_adjusted_sex, sex_coef, `sex effect`)
+  
+
+       return(pval_df)
 }
 
 # Loop through tissues and process each one
