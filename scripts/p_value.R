@@ -9,7 +9,6 @@ data_dir <- file.path(app_dir, "data")
 covariates_dir <- file.path(data_dir, "covariates")
 p_value_dir <- file.path(data_dir, "p_value")
 
-
 tissue_file <- file.path(data_dir, "tissue_names.txt")
 tissues <- readLines(tissue_file)
 # tissues <- (c("cervix ectocervix", "cervix endocervix", "fallopian tube", "ovary", "prostate", "testis", "uterus", "vagina"))
