@@ -1,5 +1,6 @@
 library(tidyverse)
 library(patchwork)
+library(fs)
 
 input_dir <- "/Users/mingruili/Library/CloudStorage/OneDrive-Emory/shiny/data/p_value"
 csv_files <- dir_ls(input_dir, regexp = "\\.csv$")
@@ -7,7 +8,7 @@ data_list <- map(csv_files, ~read_csv(.x) %>% mutate(filename = path_file(.x)))
 
 # 1. Create cleaner individual plots
 plot_list <- imap(data_list, ~{
-  ggplot(.x, aes(x = p_value)) + # Remove as.numeric() if already numeric
+  ggplot(.x, aes(x = p_value_age)) + # Remove as.numeric() if already numeric
     geom_histogram(bins = 15, fill = "#1f77b4", alpha = 0.9) + # Fewer bins
     labs(title = str_remove(path_file(.y), "_pvalue_results\\.csv$")) +
     # theme_void() + # Minimal theme
