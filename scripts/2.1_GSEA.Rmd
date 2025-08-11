@@ -93,14 +93,18 @@ doGSEA <- function(pval_table, gene_list, tissue_name = "") {
   return(res)
 }
 
+app_dir <- here::here()
+data_dir <- file.path(app_dir, "data")
+tissue_file <- file.path(data_dir, "tissue_names.txt")
+tissues <- readLines(tissue_file)
 tissue_list <- c("brain_cortex","brain_frontal_cortex_BA9",
                  "brain_cerebellum","brain_hippocampus",
                  "breast_mammary_tissue",
                  "liver","lung","whole_blood")
 
-gsea_plots <- lapply(tissue_list, function(t) {
-  tissue_name <- gsub("_"," ",t) %>% str_to_title()
-  pval_table <- read.csv(here::here(result_dir, sprintf("%s_pvalue_results.csv", t)), header = TRUE,   na.strings = c("", "NA", "--", "Inf")
+gsea_plots <- lapply(tissues, function(t) {
+  tissue_name <- gsub(" ","_",t)
+  pval_table <- read.csv(here::here(result_dir, sprintf("%s_pvalue_results.csv", tissue_name)), header = TRUE,   na.strings = c("", "NA", "--", "Inf")
 )
   res <- doGSEA(pval_table, gene_list = gene_list, tissue_name = tissue_name)
   if (!dir.exists(plot_dir)) dir.create(plot_dir, recursive = TRUE)
