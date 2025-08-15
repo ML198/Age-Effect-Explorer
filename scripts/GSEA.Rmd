@@ -1,0 +1,155 @@
+---
+title: "2.1_GSEA"
+author: "Ronnie Li"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+### Gene Set Enrichment ANalysis (GSEA)
+
+This script runs GSEA on the age-associated genes in the GTEx 
+Consortium v10 dataset.
+
+```{r setup, include=FALSE}
+here::i_am("scripts/2.1_GSEA.Rmd")
+knitr::opts_chunk$set(echo = TRUE)
+
+suppressMessages(library(tidyverse))
+suppressMessages(library(fgsea))
+suppressMessages(library(msigdbr))
+suppressMessages(library(patchwork))
+
+# ggplot2 theme for manuscript
+theme_ms <- function(base_size = 14, base_family = "") {
+  ggplot2::theme_classic(base_size = base_size, base_family = base_family) +
+    ggplot2::theme(
+      panel.border = ggplot2::element_rect(colour = "black", fill = NA, linewidth = 1),
+      strip.background = ggplot2::element_rect(linetype = "blank"),
+      plot.title = ggplot2::element_text(size = ggplot2::rel(1)),
+      axis.text = ggplot2::element_text(size = ggplot2::rel(0.75)),
+      panel.grid.minor = ggplot2::element_line(colour = "grey90", linewidth = 0.5),
+      panel.grid.major = ggplot2::element_line(colour = "grey90", linewidth = 0.5),
+      complete = FALSE
+    )
+}
+
+# directories
+result_dir <- "data/p_value"
+plot_dir <- "figures"
+
+# get MSigDB genes
+geneset <- msigdbr(db_species = "HS", species = "human", 
+                   collection = "C2" , subcollection = "CP:WIKIPATHWAYS")
+gene_list <- split(geneset$gene_symbol, f = geneset$gs_description)
+
+```
+
+### Main GSEA function
+Define GSEA function to use `fgsea()` on predefined gene set
+
+```{r}
+
+doGSEA <- function(pval_table, gene_list, tissue_name = "",
+                   direction = c("up","down","both"),
+                   restrict_ranking = FALSE,
+                   top_n = 8) {
+
+  direction <- match.arg(direction)
+
+  df <- pval_table %>%
+    dplyr::select(Gene, p_value_age, age_coef) %>%
+    dplyr::mutate(
+      p_value_age = as.numeric(p_value_age),
+      age_coef    = as.numeric(age_coef),
+      rank        = sign(age_coef) * -log10(p_value_age)
+    ) %>%
+    dplyr::filter(is.finite(rank), is.finite(p_value_age), !is.na(Gene))
+
+  if (restrict_ranking && direction != "both") {
+    df <- dplyr::filter(df, if (direction == "up") age_coef > 0 else age_coef < 0)
+  }
+
+  df <- dplyr::arrange(df, dplyr::desc(rank))
+  set.seed(1234)
+  Z <- stats::setNames(df$rank, df$Gene)
+
+  gsea_res <- fgseaMultilevel(
+    pathways = gene_list,
+    stats = Z,
+    maxSize = 300,
+    nPermSimple = 10000,
+    nproc = 1
+  ) %>%
+    dplyr::mutate(Direction = dplyr::case_when(
+      NES > 0 ~ "Upregulated",
+      NES < 0 ~ "Downregulated",
+      TRUE    ~ NA_character_
+    )) %>%
+    dplyr::filter(!is.na(Direction), is.finite(padj)) %>%   # padj, not FDR
+    dplyr::mutate(Direction = factor(Direction, levels = c("Upregulated","Downregulated")))
+
+  # optional view filter
+  if (direction == "up")   gsea_res <- dplyr::filter(gsea_res, NES > 0)
+  if (direction == "down") gsea_res <- dplyr::filter(gsea_res, NES < 0)
+
+  gsea_res <- dplyr::arrange(gsea_res, pval)
+
+  to_plot <- gsea_res %>%
+    dplyr::mutate(
+      pathway = stringr::str_wrap(gsub("_"," ", pathway), width = 40)
+    ) %>%
+    dplyr::group_by(Direction) %>%
+    dplyr::slice_head(n = top_n) %>%
+    dplyr::ungroup() %>%
+    droplevels()
+
+  # compress to one strip if only one side requested
+  if (direction != "both") {
+    lvl <- if (direction == "up") "Upregulated" else "Downregulated"
+    to_plot$Direction <- factor(lvl, levels = lvl)
+  }
+
+  p <- ggplot(to_plot, aes(x = -log10(padj),
+                           y = reorder(pathway, -padj),
+                           size = size,
+                           colour = abs(NES))) +
+    geom_point(alpha = 0.5) +
+    geom_vline(xintercept = -log10(0.05), linetype = "dashed",
+               colour = "darkorange", linewidth = 0.8) +
+    facet_grid(rows = vars(Direction), space = "free", scales = "free", drop = TRUE) +
+    theme_ms() +
+    labs(x = "-log10 FDR", y = "Pathway",
+         title = stringr::str_to_title(tissue_name),
+         colour = "|NES|", size = "Gene set size")
+
+  list(result = gsea_res, plot = p)
+}
+
+
+app_dir <- here::here()
+data_dir <- file.path(app_dir, "data")
+tissue_file <- file.path(data_dir, "tissue_names.txt")
+tissues <- readLines(tissue_file)
+# tissue_list <- c("lung","whole_blood")
+direction_choice <- "both"
+
+gsea_plots <- lapply(tissues, function(t) {
+  tissue_name <- gsub(" ","_",t)
+  pval_table <- read.csv(here::here(result_dir, sprintf("%s_pvalue_results.csv", tissue_name)), header = TRUE,   na.strings = c("", "NA", "--", "Inf")
+)
+  res <- doGSEA(pval_table, gene_list = gene_list,
+                tissue_name = tissue_name,
+                direction = direction_choice,
+                restrict_ranking = FALSE,  # set TRUE if you want one-sided ranking
+                top_n = 8)
+  out_height <- if (direction_choice == "both") 8 else 4
+
+  if (!dir.exists(plot_dir)) dir.create(plot_dir, recursive = TRUE)
+  ggsave(here::here(plot_dir, sprintf("DAS_%s_GSEA.png", t)),
+         plot = res$plot, scale = 1, width = 9, height = out_height, dpi = 400, bg = 'white')
+  return(res$plot)
+})
+
+
+```
+
