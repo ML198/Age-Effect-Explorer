@@ -11,7 +11,7 @@ This script runs GSEA on the age-associated genes in the GTEx
 Consortium v10 dataset.
 
 ```{r setup, include=FALSE}
-here::i_am("scripts/2.1_GSEA.Rmd")
+here::i_am("scripts/GSEA.Rmd")
 knitr::opts_chunk$set(echo = TRUE)
 
 suppressMessages(library(tidyverse))
@@ -34,12 +34,27 @@ theme_ms <- function(base_size = 14, base_family = "") {
 }
 
 # directories
-result_dir <- "data/p_value"
-plot_dir <- "figures"
+result_dir<- file.path(here::here("data/p_value"))
+plot_dir<- file.path(here::here("figures"))
+out_dir<- file.path(here::here("data/gsea"))   # 你想存表的目录
+tissue_file <- file.path(here::here("data/tissue_names.txt"))
+tissues <- readLines(tissue_file)
+padj_thresh      <- 1e-5
+direction_choice <- "both"
+top_n            <- 8
+out_height       <- if (direction_choice == "both") 8 else 4
+
+if (!dir.exists(plot_dir))   dir.create(plot_dir, recursive = TRUE)
+if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+
 
 # get MSigDB genes
 geneset <- msigdbr(db_species = "HS", species = "human", 
                    collection = "C2" , subcollection = "CP:WIKIPATHWAYS")
+pathway_map <- geneset %>%
+  dplyr::distinct(gs_description, gs_name) %>%
+  dplyr::rename(pathway_desc = gs_description, pathway_id = gs_name)
+
 gene_list <- split(geneset$gene_symbol, f = geneset$gs_description)
 
 ```
@@ -92,7 +107,7 @@ doGSEA <- function(pval_table, gene_list, tissue_name = "",
   if (direction == "up")   gsea_res <- dplyr::filter(gsea_res, NES > 0)
   if (direction == "down") gsea_res <- dplyr::filter(gsea_res, NES < 0)
 
-  gsea_res <- dplyr::arrange(gsea_res, pval)
+  gsea_res <- dplyr::arrange(gsea_res, padj)
 
   to_plot <- gsea_res %>%
     dplyr::mutate(
@@ -124,32 +139,67 @@ doGSEA <- function(pval_table, gene_list, tissue_name = "",
 
   list(result = gsea_res, plot = p)
 }
+```
 
 
-app_dir <- here::here()
-data_dir <- file.path(app_dir, "data")
-tissue_file <- file.path(data_dir, "tissue_names.txt")
-tissues <- readLines(tissue_file)
-# tissue_list <- c("lung","whole_blood")
-direction_choice <- "both"
+## Generate the table with padj <1e-5
+
+```{r}
+make_and_save_tables <- function(gsea_res, tissue_name,
+                                 padj_thresh = 1e-5,
+                                 out_dir = "data/gsea") {
+  # 如果还没有 pathway_id，就在这里补上
+  if (!"pathway_id" %in% names(gsea_res)) {
+    gsea_res <- gsea_res %>%
+      dplyr::left_join(pathway_map, by = c("pathway" = "pathway_desc"))
+  }
+  
+  keep_df <- gsea_res %>%
+    dplyr::filter(is.finite(padj), padj < padj_thresh) %>%
+    dplyr::mutate(pathway = gsub("_", " ", pathway)) %>%
+    dplyr::select(pathway_id, pathway, Direction, NES, pval, padj) 
+
+  outfile <- file.path(out_dir, sprintf("GSEA_%s_padj1e-5.csv", tissue_name))
+  readr::write_csv(keep_df, outfile)
+  
+  list(table = keep_df, file = outfile)
+}
+
+```
+
+## Run across tissues
+```{r}
+all_tables <- list()
 
 gsea_plots <- lapply(tissues, function(t) {
   tissue_name <- gsub(" ","_",t)
   pval_table <- read.csv(here::here(result_dir, sprintf("%s_pvalue_results.csv", tissue_name)), header = TRUE,   na.strings = c("", "NA", "--", "Inf")
 )
-  res <- doGSEA(pval_table, gene_list = gene_list,
-                tissue_name = tissue_name,
-                direction = direction_choice,
-                restrict_ranking = FALSE,  # set TRUE if you want one-sided ranking
-                top_n = 8)
-  out_height <- if (direction_choice == "both") 8 else 4
+  res <- doGSEA(
+    pval_table   = pval_table,
+    gene_list    = gene_list,
+    tissue_name  = tissue_name,
+    direction    = direction_choice,   # "both"
+    restrict_ranking = FALSE,
+    top_n        = top_n
+  )
+  tbls <- make_and_save_tables(
+    gsea_res     = res$result,
+    tissue_name  = tissue_name,
+    padj_thresh  = padj_thresh,
+    out_dir      = out_dir
+  )
+  all_tables[[tissue_name]] <- tbls$table %>%
+    dplyr::mutate(tissue = tissue_name, .before = 1)
 
-  if (!dir.exists(plot_dir)) dir.create(plot_dir, recursive = TRUE)
-  ggsave(here::here(plot_dir, sprintf("DAS_%s_GSEA.png", t)),
-         plot = res$plot, scale = 1, width = 9, height = out_height, dpi = 400, bg = 'white')
-  return(res$plot)
-})
-
-
+  # ggsave(here::here(plot_dir, sprintf("DAS_%s_GSEA.png", t)),
+  #        plot = res$plot, scale = 1, width = 9, height = out_height, dpi = 400, bg = "white")
+  # 
+  # res$plot
+  })
+all_df <- dplyr::bind_rows(all_tables)
+readr::write_csv(all_df, file.path(out_dir, "GSEA_all_tissues_padj1e-5.csv"))
+message(sprintf("[GSEA] Saved combined table: %s (n=%d)",
+                file.path(out_dir, "GSEA_all_tissues_padj1e-5.csv"), nrow(all_df)))
 ```
 
