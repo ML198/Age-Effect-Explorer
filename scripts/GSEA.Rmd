@@ -39,9 +39,9 @@ plot_dir<- file.path(here::here("figures"))
 out_dir<- file.path(here::here("data/gsea"))   # 你想存表的目录
 tissue_file <- file.path(here::here("data/tissue_names.txt"))
 tissues <- readLines(tissue_file)
-padj_thresh      <- 1e-5
+padj_thresh      <- 1
 direction_choice <- "both"
-top_n            <- 8
+top_n            <- 7
 out_height       <- if (direction_choice == "both") 8 else 4
 
 if (!dir.exists(plot_dir))   dir.create(plot_dir, recursive = TRUE)
@@ -67,7 +67,7 @@ Define GSEA function to use `fgsea()` on predefined gene set
 doGSEA <- function(pval_table, gene_list, tissue_name = "",
                    direction = c("up","down","both"),
                    restrict_ranking = FALSE,
-                   top_n = 8) {
+                   top_n = 7) {
 
   direction <- match.arg(direction)
 
@@ -80,30 +80,51 @@ doGSEA <- function(pval_table, gene_list, tissue_name = "",
     ) %>%
     dplyr::filter(is.finite(rank), is.finite(p_value_age), !is.na(Gene))
 
-  if (restrict_ranking && direction != "both") {
-    df <- dplyr::filter(df, if (direction == "up") age_coef > 0 else age_coef < 0)
+  # helper to enforce the 100–1000 rule for a given direction
+  .prep_and_run <- function(df, which_dir = c("up","down")) {
+    which_dir <- match.arg(which_dir)
+    sub <- if (which_dir == "up") dplyr::filter(df, age_coef > 0) else dplyr::filter(df, age_coef < 0)
+
+    # sort by significance (smallest p first); cap to top 1000 if needed
+    sub <- dplyr::arrange(sub, p_value_age)
+    n <- nrow(sub)
+    if (n < 100) return(NULL)
+    if (n > 1000) sub <- dplyr::slice_head(sub, n = 1000)
+
+    # build stats for fgsea using your original rank metric
+    Z <- stats::setNames(sub$rank, sub$Gene)
+
+    set.seed(1234)
+    fgseaMultilevel(
+      pathways = gene_list,
+      stats = Z,
+      maxSize = 300,
+      nPermSimple = 10000,
+      nproc = 1
+    ) %>%
+      dplyr::mutate(Direction = dplyr::case_when(
+        NES > 0 ~ "Upregulated",
+        NES < 0 ~ "Downregulated",
+        TRUE    ~ NA_character_
+      )) %>%
+      dplyr::filter(!is.na(Direction), is.finite(padj)) %>%
+      dplyr::mutate(Direction = factor(Direction, levels = c("Upregulated","Downregulated")))
   }
 
-  df <- dplyr::arrange(df, dplyr::desc(rank))
-  set.seed(1234)
-  Z <- stats::setNames(df$rank, df$Gene)
+  # run per requested direction(s)
+  if (direction == "both") {
+    gsea_up   <- .prep_and_run(df, "up")
+    gsea_down <- .prep_and_run(df, "down")
+    gsea_res  <- dplyr::bind_rows(gsea_up, gsea_down)
+  } else {
+    gsea_res <- .prep_and_run(df, direction)
+  }
+  # if nothing qualified, return empty result/plot
+  if (is.null(gsea_res) || nrow(gsea_res) == 0) {
+    return(list(result = tibble::tibble(), plot = ggplot() + theme_void()))
+  }
 
-  gsea_res <- fgseaMultilevel(
-    pathways = gene_list,
-    stats = Z,
-    maxSize = 300,
-    nPermSimple = 10000,
-    nproc = 1
-  ) %>%
-    dplyr::mutate(Direction = dplyr::case_when(
-      NES > 0 ~ "Upregulated",
-      NES < 0 ~ "Downregulated",
-      TRUE    ~ NA_character_
-    )) %>%
-    dplyr::filter(!is.na(Direction), is.finite(padj)) %>%   # padj, not FDR
-    dplyr::mutate(Direction = factor(Direction, levels = c("Upregulated","Downregulated")))
-
-  # optional view filter
+  # optional view filter (kept from your code)
   if (direction == "up")   gsea_res <- dplyr::filter(gsea_res, NES > 0)
   if (direction == "down") gsea_res <- dplyr::filter(gsea_res, NES < 0)
 
@@ -146,22 +167,46 @@ doGSEA <- function(pval_table, gene_list, tissue_name = "",
 
 ```{r}
 make_and_save_tables <- function(gsea_res, tissue_name,
-                                 padj_thresh = 1e-5,
+                                 padj_thresh = 0.05,
                                  out_dir = "data/gsea") {
-  # 如果还没有 pathway_id，就在这里补上
-  if (!"pathway_id" %in% names(gsea_res)) {
+
+  if (is.null(gsea_res) || !"pathway" %in% names(gsea_res) || nrow(gsea_res) == 0) {
+    keep_df <- tibble::tibble(
+      pathway_id = character(),
+      pathway    = character(),
+      Direction  = factor(levels = c("Upregulated","Downregulated")),
+      NES        = numeric(),
+      pval       = numeric(),
+      padj       = numeric()
+    )
+    outfile <- file.path(out_dir, sprintf("GSEA_%s.csv", tissue_name, padj_thresh))
+    readr::write_csv(keep_df, outfile)
+    message(sprintf("[GSEA] %s: no pathways to save; wrote header-only file.", tissue_name))
+    return(list(table = keep_df, file = outfile))
+  }
+    if (!"pathway_id" %in% names(gsea_res)) {
     gsea_res <- gsea_res %>%
       dplyr::left_join(pathway_map, by = c("pathway" = "pathway_desc"))
   }
-  
+
   keep_df <- gsea_res %>%
     dplyr::filter(is.finite(padj), padj < padj_thresh) %>%
     dplyr::mutate(pathway = gsub("_", " ", pathway)) %>%
     dplyr::select(pathway_id, pathway, Direction, NES, pval, padj) 
 
-  outfile <- file.path(out_dir, sprintf("GSEA_%s_padj1e-5.csv", tissue_name))
-  readr::write_csv(keep_df, outfile)
+    if (nrow(keep_df) == 0) {
+      keep_df <- tibble::tibble(
+        pathway_id = character(),
+        pathway    = character(),
+        Direction  = factor(levels = c("Upregulated","Downregulated")),
+        NES        = numeric(),
+        pval       = numeric(),
+        padj       = numeric()
+      )
+    }
   
+  outfile <- file.path(out_dir, sprintf("GSEA_%s.csv", tissue_name, padj_thresh))
+  readr::write_csv(keep_df, outfile)
   list(table = keep_df, file = outfile)
 }
 
@@ -189,17 +234,18 @@ gsea_plots <- lapply(tissues, function(t) {
     padj_thresh  = padj_thresh,
     out_dir      = out_dir
   )
-  all_tables[[tissue_name]] <- tbls$table %>%
-    dplyr::mutate(tissue = tissue_name, .before = 1)
+  # all_tables[[tissue_name]] <- tbls$table %>%
+  #   dplyr::mutate(tissue = tissue_name, .before = 1)
 
-  # ggsave(here::here(plot_dir, sprintf("DAS_%s_GSEA.png", t)),
-  #        plot = res$plot, scale = 1, width = 9, height = out_height, dpi = 400, bg = "white")
-  # 
-  # res$plot
+  ggsave(here::here(plot_dir, sprintf("DAS_%s_GSEA.png", t)),
+         plot = res$plot, scale = 1, width = 9, height = out_height, dpi = 400, bg = "white")
+
+  res$plot
   })
-all_df <- dplyr::bind_rows(all_tables)
-readr::write_csv(all_df, file.path(out_dir, "GSEA_all_tissues_padj1e-5.csv"))
-message(sprintf("[GSEA] Saved combined table: %s (n=%d)",
-                file.path(out_dir, "GSEA_all_tissues_padj1e-5.csv"), nrow(all_df)))
+# all_df <- dplyr::bind_rows(all_tables)
+# readr::write_csv(all_df, file.path(out_dir, "GSEA_all_tissues_padj1e-5.csv"))
+# message(sprintf("[GSEA] Saved combined table: %s (n=%d)",
+                # file.path(out_dir, "GSEA_all_tissues_padj1e-5.csv"), nrow(all_df)))
+
 ```
 
