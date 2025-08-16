@@ -67,7 +67,6 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       # skip if TPM is too constant
       if (nrow(df_sub) == 0 || sd(df_sub$log2TPM, na.rm = TRUE) < 1e-6 || mean(df_sub$log2TPM == 0, na.rm = TRUE) > 0.1) {
         return(tibble(p_value_age = NA_real_, p_value_sex = NA_real_, age_coef = NA_real_, sex_coef = NA_real_, `sex effect` = NA_character_, `age effect` = NA_character_))
-        # return(tibble(p_value = NA_real_, age_coef = NA_real_))
       }
       
       # Identify remaining variables for the regression model

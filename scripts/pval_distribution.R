@@ -2,8 +2,8 @@ library(tidyverse)
 library(patchwork)
 library(fs)
 
-input_dir <- "/Users/mingruili/Library/CloudStorage/OneDrive-Emory/shiny/data/p_value"
-csv_files <- dir_ls(input_dir, regexp = "\\.csv$")
+input_dir <- here::here("data/p_value")
+csv_files <- fs::dir_ls(input_dir, regexp = "\\.csv$")
 data_list <- map(csv_files, ~read_csv(.x) %>% mutate(filename = path_file(.x)))
 
 # 1. Create cleaner individual plots

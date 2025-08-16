@@ -24,7 +24,9 @@ make_image_grids <- function(input_dir,
   if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
   
   files <- list.files(input_dir, pattern = pattern, full.names = TRUE)
-  files <- stringr::str_sort(files, numeric = TRUE)
+  files <- stringr::str_sort(files, numeric = TRUE) %>% 
+    (\(f) f[file.info(f)$size > 50 * 1024])()
+  
   if (length(files) == 0) stop("No files matched pattern in input_dir.")
   
   k <- nrow * ncol
