@@ -148,7 +148,7 @@ calc_all_genes_pvalue_for_tissue <- function(tissue) {
       sex_coef = formatC(signif(sex_coef, 2), format = "e", digits = 2),
       
     ) %>%
-    filter(!is.na(p_value_age) & p_value_age != "NA" & p_value_age != " NA") %>% 
+    filter(BH_adjusted_age < 0.05 & !is.na(p_value_age) & p_value_age != "NA" & p_value_age != " NA") %>% 
     select(Rank, Gene, intercept, p_value_age, BH_adjusted_age, age_coef, `age effect`, p_value_sex, BH_adjusted_sex, sex_coef, `sex effect`)
   
 
