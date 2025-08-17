@@ -3,7 +3,7 @@ title: "Age-Effect-Explorer"
 date: "`r Sys.Date()`"
 output:
   github_document:
-    toc: true
+    toc: false
     toc_depth: 2
     fig_width: 7
     fig_height: 5
@@ -13,7 +13,7 @@ output:
 
 A Shiny application to visualize age- and sex-associated changes in gene expression across 54 human tissues using GTEx v10 data.
 
-## Get start
+## Getting Started
 
 You can access the deployed Shiny app here: <https://menghui.shinyapps.io/Age_Effect_Explorer/>
 
@@ -40,3 +40,11 @@ You can also reproduce the shiny app with <https://github.com/menghui-c/Age-Effe
 -   `scripts/pval_distribution.R`:Aggregates p-value results across tissues and plots p-value distribution histograms
 
 -   `age_sig_genes_by_tissue.py`: Produces a summarized table including all the information of age-related significant genes across all 54 tissues, each sheet represents one tissue.
+
+## Acknowledgements / Citation
+
+The data used for the analyses described in this project were obtained from the [GTEx Portal](https://gtexportal.org/home/) [v.10].
+
+## Contact
+
+If you have any questions or issues regarding this project, please contact Dr. Qin (email: [zhaohui.qin\@emory.edu](mailto:zhaohui.qin@emory.edu){.email}).

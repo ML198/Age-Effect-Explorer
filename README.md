@@ -2,17 +2,12 @@ Age-Effect-Explorer
 ================
 2025-08-16
 
-- [Age-Effect-Explorer](#age-effect-explorer)
-- [Get start](#get-start)
-- [Data Sources](#data-sources)
-- [Project Structure](#project-structure)
-
 ## Age-Effect-Explorer
 
 A Shiny application to visualize age- and sex-associated changes in gene
 expression across 54 human tissues using GTEx v10 data.
 
-## Get start
+## Getting Started
 
 You can access the deployed Shiny app here:
 <https://menghui.shinyapps.io/Age_Effect_Explorer/>
@@ -52,3 +47,13 @@ instructions to install the app in details.
 - `age_sig_genes_by_tissue.py`: Produces a summarized table including
   all the information of age-related significant genes across all 54
   tissues, each sheet represents one tissue.
+
+## Acknowledgements / Citation
+
+The data used for the analyses described in this project were obtained
+from the [GTEx Portal](https://gtexportal.org/home/) \[v.10\].
+
+## Contact
+
+If you have any questions or issues regarding this project, please
+contact Dr. Qin (email: <zhaohui.qin@emory.edu>).
